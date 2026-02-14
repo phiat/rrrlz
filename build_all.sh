@@ -6,7 +6,10 @@
 #   bash build_all.sh              # build all (hello.c, dijkstra, astar)
 #   bash build_all.sh dijkstra     # build only dijkstra
 #   bash build_all.sh astar        # build only astar
-#   bash build_all.sh hello        # build only hello
+#   bash build_all.sh bellman_ford  # build only bellman_ford
+#   bash build_all.sh floyd_warshall # build only floyd_warshall
+#   bash build_all.sh ida_star      # build only ida_star
+#   bash build_all.sh hello         # build only hello
 #   bash build_all.sh visualizer   # build only visualizer (SDL2, no LLVM pipeline)
 
 set -e
@@ -66,7 +69,7 @@ build_visualizer() {
 TARGETS=()
 BUILD_VIS=0
 if [ $# -eq 0 ]; then
-    TARGETS=("hello/hello.c" "dijkstra/dijkstra.c" "astar/astar.c")
+    TARGETS=("hello/hello.c" "dijkstra/dijkstra.c" "astar/astar.c" "bellman_ford/bellman_ford.c" "floyd_warshall/floyd_warshall.c" "ida_star/ida_star.c")
     BUILD_VIS=1
 else
     for arg in "$@"; do
@@ -74,6 +77,9 @@ else
             hello)      TARGETS+=("hello/hello.c") ;;
             dijkstra)   TARGETS+=("dijkstra/dijkstra.c") ;;
             astar)      TARGETS+=("astar/astar.c") ;;
+            bellman_ford) TARGETS+=("bellman_ford/bellman_ford.c") ;;
+            floyd_warshall) TARGETS+=("floyd_warshall/floyd_warshall.c") ;;
+            ida_star)   TARGETS+=("ida_star/ida_star.c") ;;
             visualizer) BUILD_VIS=1 ;;
             *)          TARGETS+=("$arg") ;;
         esac

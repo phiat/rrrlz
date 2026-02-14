@@ -9,6 +9,9 @@ A collection of C programs built through the LLVM toolchain at multiple optimiza
 | `hello/` | Hello World | Minimal baseline — shows optimization pipeline with trivial code |
 | `dijkstra/` | Dijkstra's Algorithm | Shortest path on a 20x20 grid, uniform expansion |
 | `astar/` | A* Search | Heuristic-guided shortest path on the same grid |
+| `bellman_ford/` | Bellman-Ford | Edge-relaxation shortest path, no heap, negative weight support |
+| `floyd_warshall/` | Floyd-Warshall | All-pairs shortest paths, O(V^3) triple-nested loop |
+| `ida_star/` | IDA* | Memory-efficient A* via iterative deepening with f-cost threshold |
 | `visualizer/` | SDL2 Visualizer | Step-through animation of Dijkstra and A* |
 
 ## How It Works
@@ -96,11 +99,20 @@ rrrlz/
 ├── hello/
 │   └── hello.c            # Minimal baseline program
 ├── dijkstra/
-│   ├── README.md
+│   ├── ALGO.md
 │   └── dijkstra.c         # Dijkstra's shortest path
 ├── astar/
-│   ├── README.md
+│   ├── ALGO.md
 │   └── astar.c            # A* search with Manhattan heuristic
+├── bellman_ford/
+│   ├── ALGO.md
+│   └── bellman_ford.c     # Bellman-Ford edge relaxation
+├── floyd_warshall/
+│   ├── ALGO.md
+│   └── floyd_warshall.c   # Floyd-Warshall all-pairs shortest paths
+├── ida_star/
+│   ├── ALGO.md
+│   └── ida_star.c         # IDA* iterative deepening A*
 └── visualizer/
     └── visualizer.c       # SDL2 step-through animation
 ```
