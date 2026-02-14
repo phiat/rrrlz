@@ -7,6 +7,7 @@
 #   bash build_all.sh dijkstra     # build only dijkstra
 #   bash build_all.sh astar        # build only astar
 #   bash build_all.sh hello        # build only hello
+#   bash build_all.sh visualizer   # build only visualizer (SDL2, no LLVM pipeline)
 
 set -e
 
@@ -51,25 +52,46 @@ build_one() {
     done
 }
 
+build_visualizer() {
+    echo ""
+    echo "============================================"
+    echo "  Building: visualizer (SDL2)"
+    echo "============================================"
+    clang -O2 visualizer/visualizer.c -o visualizer/visualizer \
+        $(pkg-config --cflags --libs sdl2)
+    echo "  -> visualizer/visualizer"
+}
+
 # Determine what to build
 TARGETS=()
+BUILD_VIS=0
 if [ $# -eq 0 ]; then
     TARGETS=("hello/hello.c" "dijkstra/dijkstra.c" "astar/astar.c")
+    BUILD_VIS=1
 else
     for arg in "$@"; do
         case "$arg" in
             hello)      TARGETS+=("hello/hello.c") ;;
             dijkstra)   TARGETS+=("dijkstra/dijkstra.c") ;;
             astar)      TARGETS+=("astar/astar.c") ;;
+            visualizer) BUILD_VIS=1 ;;
             *)          TARGETS+=("$arg") ;;
         esac
     done
 fi
 
-# Build each target
+# Build each target through the LLVM pipeline
 for target in "${TARGETS[@]}"; do
     build_one "$target"
 done
+
+# Build visualizer (SDL2, separate from LLVM pipeline)
+if [ "$BUILD_VIS" -eq 1 ] && pkg-config --exists sdl2 2>/dev/null; then
+    build_visualizer
+elif [ "$BUILD_VIS" -eq 1 ]; then
+    echo ""
+    echo "⚠ Skipping visualizer: SDL2 not found (apt install libsdl2-dev)"
+fi
 
 # Size comparison table
 echo ""

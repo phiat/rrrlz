@@ -9,6 +9,7 @@ A collection of C programs built through the LLVM toolchain at multiple optimiza
 | `hello/` | Hello World | Minimal baseline — shows optimization pipeline with trivial code |
 | `dijkstra/` | Dijkstra's Algorithm | Shortest path on a 20x20 grid, uniform expansion |
 | `astar/` | A* Search | Heuristic-guided shortest path on the same grid |
+| `visualizer/` | SDL2 Visualizer | Step-through animation of Dijkstra and A* |
 
 ## How It Works
 
@@ -28,16 +29,20 @@ The key insight: by generating clean (unoptimized) IR first and then running `op
 
 ```bash
 # Build everything
+just all
 bash build_all.sh
 
 # Build one target
-bash build_all.sh dijkstra
-bash build_all.sh astar
-bash build_all.sh hello
+just dijkstra
+just visualizer
 
 # Run
 ./dijkstra/dijkstra_opt_O2
 ./astar/astar_opt_O2
+
+# Visualizer (requires libsdl2-dev, WSLg or X11)
+just run
+./visualizer/visualizer
 ```
 
 ## Comparing Optimizations
@@ -86,15 +91,18 @@ The pathfinding implementations deliberately include patterns that produce diffe
 ```
 rrrlz/
 ├── README.md              # This file
+├── justfile               # Build recipes (just all, just run, etc.)
 ├── build_all.sh           # Build script for all targets
 ├── hello/
 │   └── hello.c            # Minimal baseline program
 ├── dijkstra/
 │   ├── README.md
 │   └── dijkstra.c         # Dijkstra's shortest path
-└── astar/
-    ├── README.md
-    └── astar.c            # A* search with Manhattan heuristic
+├── astar/
+│   ├── README.md
+│   └── astar.c            # A* search with Manhattan heuristic
+└── visualizer/
+    └── visualizer.c       # SDL2 step-through animation
 ```
 
 ## Requirements
@@ -102,5 +110,7 @@ rrrlz/
 - `clang` (C compiler + IR generation)
 - `opt` (LLVM optimizer)
 - `llc` (LLVM static compiler — IR to assembly)
+- `libsdl2-dev` (for visualizer only)
+- `just` (task runner, optional — `cargo install just` or via mise)
 
-All part of the LLVM/Clang toolchain.
+All part of the LLVM/Clang toolchain (`apt install clang llvm libsdl2-dev`).
