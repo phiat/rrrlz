@@ -19,39 +19,40 @@ typedef struct {
     int fwd_turn;   /* 1 = forward turn, 0 = backward turn */
 } BiAstarState;
 
-static BiAstarState state;
+static BiAstarState *state;
 
 static AlgoVis *bidir_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.fwd_heap);
-    heap_init(&state.bwd_heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->fwd_heap);
+    heap_init(&state->bwd_heap);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++) {
-        state.fwd_cost[i] = INT_MAX;
-        state.bwd_cost[i] = INT_MAX;
-        state.fwd_parent[i] = -1;
-        state.bwd_parent[i] = -1;
+        state->fwd_cost[i] = INT_MAX;
+        state->bwd_cost[i] = INT_MAX;
+        state->fwd_parent[i] = -1;
+        state->bwd_parent[i] = -1;
     }
 
-    int start = state.vis.start_node;
-    int goal = state.vis.end_node;
+    int start = state->vis.start_node;
+    int goal = state->vis.end_node;
 
-    state.fwd_cost[start] = 0;
-    state.bwd_cost[goal] = 0;
+    state->fwd_cost[start] = 0;
+    state->bwd_cost[goal] = 0;
 
     int h_fwd = manhattan(map->start_r, map->start_c, map->end_r, map->end_c);
     int h_bwd = h_fwd;
-    heap_push(&state.fwd_heap, start, h_fwd);
-    heap_push(&state.bwd_heap, goal, h_bwd);
+    heap_push(&state->fwd_heap, start, h_fwd);
+    heap_push(&state->bwd_heap, goal, h_bwd);
 
-    state.mu = INT_MAX;
-    state.meet_node = -1;
-    state.fwd_turn = 1;
+    state->mu = INT_MAX;
+    state->meet_node = -1;
+    state->fwd_turn = 1;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int bidir_step(AlgoVis *vis) {

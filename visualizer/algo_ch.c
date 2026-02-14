@@ -44,7 +44,7 @@ typedef struct {
     int edge_diff[MAX_NODES]; /* cached edge-difference */
 } CHState;
 
-static CHState state;
+static CHState *state;
 
 /* Count edges to/from uncontracted neighbors */
 static void ch_count_edges(CHState *s, int node, int *in_deg, int *out_deg) {
@@ -159,25 +159,26 @@ static void add_up_edge(CHState *s, int from, int to, int cost, int mid) {
 }
 
 static AlgoVis *ch_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.fwd_heap);
-    heap_init(&state.bwd_heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->fwd_heap);
+    heap_init(&state->bwd_heap);
 
-    state.total_nodes = map->rows * map->cols;
-    for (int i = 0; i < state.total_nodes; i++) {
-        state.fwd_dist[i] = INT_MAX;
-        state.bwd_dist[i] = INT_MAX;
-        state.fwd_parent[i] = -1;
-        state.bwd_parent[i] = -1;
+    state->total_nodes = map->rows * map->cols;
+    for (int i = 0; i < state->total_nodes; i++) {
+        state->fwd_dist[i] = INT_MAX;
+        state->bwd_dist[i] = INT_MAX;
+        state->fwd_parent[i] = -1;
+        state->bwd_parent[i] = -1;
     }
-    state.mu = INT_MAX;
-    state.meet_node = -1;
-    state.phase = 0;
-    state.contract_order = 0;
+    state->mu = INT_MAX;
+    state->meet_node = -1;
+    state->phase = 0;
+    state->contract_order = 0;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static void ch_unpack_path(CHState *s, int from, int to) {

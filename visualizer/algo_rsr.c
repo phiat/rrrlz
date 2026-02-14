@@ -32,7 +32,7 @@ typedef struct {
     int is_perimeter[MAX_NODES]; /* 1 if on rect perimeter */
 } RSRState;
 
-static RSRState state;
+static RSRState *state;
 
 /* Try to grow a maximal rectangle starting at (r,c) */
 static int rsr_grow_rect(RSRState *s, int sr, int sc, RSRRect *out) {
@@ -87,22 +87,23 @@ static void rsr_mark_perimeter(RSRState *s) {
 }
 
 static AlgoVis *rsr_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->heap);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++) {
-        state.rect_id[i] = -1;
-        state.cost[i] = INT_MAX;
-        state.parent[i] = -1;
+        state->rect_id[i] = -1;
+        state->cost[i] = INT_MAX;
+        state->parent[i] = -1;
     }
-    state.phase = 0;
-    state.scan_r = 0;
-    state.scan_c = 0;
+    state->phase = 0;
+    state->scan_r = 0;
+    state->scan_c = 0;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int rsr_step(AlgoVis *vis) {

@@ -27,7 +27,7 @@ typedef struct {
     int phase;      /* 0 = searching, 1 = done */
 } FringeState;
 
-static FringeState state;
+static FringeState *state;
 
 /* Doubly-linked list helpers */
 static void list_remove(FringeState *s, int node) {
@@ -61,33 +61,34 @@ static void list_prepend_later(FringeState *s, int node) {
 }
 
 static AlgoVis *fringe_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++) {
-        state.nodes[i].prev = -1;
-        state.nodes[i].next = -1;
-        state.nodes[i].f = INT_MAX;
-        state.nodes[i].g = INT_MAX;
-        state.nodes[i].in_list = 0;
-        state.parent[i] = -1;
+        state->nodes[i].prev = -1;
+        state->nodes[i].next = -1;
+        state->nodes[i].f = INT_MAX;
+        state->nodes[i].g = INT_MAX;
+        state->nodes[i].in_list = 0;
+        state->parent[i] = -1;
     }
 
-    state.now_head = -1;
-    state.later_head = -1;
-    state.next_threshold = INT_MAX;
+    state->now_head = -1;
+    state->later_head = -1;
+    state->next_threshold = INT_MAX;
 
-    int start = state.vis.start_node;
+    int start = state->vis.start_node;
     int h = manhattan(map->start_r, map->start_c, map->end_r, map->end_c);
-    state.nodes[start].g = 0;
-    state.nodes[start].f = h;
-    state.threshold = h;
+    state->nodes[start].g = 0;
+    state->nodes[start].f = h;
+    state->threshold = h;
 
-    list_prepend_now(&state, start);
+    list_prepend_now(state, start);
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int fringe_step(AlgoVis *vis) {

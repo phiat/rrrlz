@@ -21,7 +21,7 @@ typedef struct {
     int phase;  /* 0 = initial search, 1 = path found, 2 = replanning */
 } DStarState;
 
-static DStarState state;
+static DStarState *state;
 
 static int dstar_key(DStarState *s, int node) {
     int g = s->g[node], rhs = s->rhs[node];
@@ -68,33 +68,34 @@ static void dstar_update_node(DStarState *s, int node) {
 }
 
 static AlgoVis *dstar_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->heap);
 
     int total = map->rows * map->cols;
     /* Mutable copy of map data */
     for (int i = 0; i < total; i++)
-        state.map_data[i] = map->data[i];
+        state->map_data[i] = map->data[i];
 
     for (int i = 0; i < total; i++) {
-        state.g[i] = INT_MAX;
-        state.rhs[i] = INT_MAX;
-        state.parent[i] = -1;
+        state->g[i] = INT_MAX;
+        state->rhs[i] = INT_MAX;
+        state->parent[i] = -1;
     }
 
     /* Goal node: rhs = 0 */
-    int goal = state.vis.end_node;
-    state.rhs[goal] = 0;
-    state.km = 0;
-    state.phase = 0;
+    int goal = state->vis.end_node;
+    state->rhs[goal] = 0;
+    state->km = 0;
+    state->phase = 0;
 
-    int key = dstar_key(&state, goal);
-    heap_push(&state.heap, goal, key);
-    state.in_heap[goal] = 1;
+    int key = dstar_key(state, goal);
+    heap_push(&state->heap, goal, key);
+    state->in_heap[goal] = 1;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int dstar_step(AlgoVis *vis) {
@@ -237,8 +238,8 @@ void dstar_notify_change(DStarState *s, int node) {
 }
 
 /* Get mutable map data pointer for wall toggles */
-int *dstar_get_map_data(void) { return state.map_data; }
-DStarState *dstar_get_state(void) { return &state; }
+int *dstar_get_map_data(void) { return state ? state->map_data : NULL; }
+DStarState *dstar_get_state(void) { return state; }
 
 AlgoPlugin algo_dstar_lite = {
     .name = "D*Lite",

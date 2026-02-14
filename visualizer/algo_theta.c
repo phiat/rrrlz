@@ -17,26 +17,27 @@ typedef struct {
     int closed[MAX_NODES];
 } ThetaState;
 
-static ThetaState state;
+static ThetaState *state;
 
 static AlgoVis *theta_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->heap);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++) {
-        state.cost[i] = INT_MAX;
-        state.parent[i] = -1;
+        state->cost[i] = INT_MAX;
+        state->parent[i] = -1;
     }
 
-    int start = state.vis.start_node;
-    state.cost[start] = 0;
+    int start = state->vis.start_node;
+    state->cost[start] = 0;
     int h = euclidean100(map->start_r, map->start_c, map->end_r, map->end_c);
-    heap_push(&state.heap, start, h);
+    heap_push(&state->heap, start, h);
 
-    return &state.vis;
+    return &state->vis;
 }
 
 /* Trace path through parent pointers (may skip cells), rasterize segments */

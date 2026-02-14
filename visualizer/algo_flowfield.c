@@ -19,28 +19,29 @@ typedef struct {
     int trace_node;            /* current position during path extraction */
 } FlowFieldState;
 
-static FlowFieldState state;
+static FlowFieldState *state;
 
 static AlgoVis *flowfield_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->heap);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++) {
-        state.int_cost[i] = INT_MAX;
-        state.flow_dir[i] = -1;
+        state->int_cost[i] = INT_MAX;
+        state->flow_dir[i] = -1;
     }
 
     /* Start Dijkstra from GOAL (reversed) */
-    int goal = state.vis.end_node;
-    state.int_cost[goal] = 0;
-    heap_push(&state.heap, goal, 0);
-    state.phase = 0;
-    state.trace_node = -1;
+    int goal = state->vis.end_node;
+    state->int_cost[goal] = 0;
+    heap_push(&state->heap, goal, 0);
+    state->phase = 0;
+    state->trace_node = -1;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int flowfield_step(AlgoVis *vis) {

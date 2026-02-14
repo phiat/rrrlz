@@ -34,7 +34,7 @@ typedef struct {
     int start_sg, end_sg; /* subgoal indices for start/end */
 } SubgoalState;
 
-static SubgoalState state;
+static SubgoalState *state;
 
 /* Check if a cell is a subgoal: adjacent to an L-shaped wall corner */
 static int is_subgoal(const MapDef *map, int r, int c) {
@@ -86,25 +86,26 @@ static int direct_reachable(SubgoalState *s, int sg1, int sg2) {
 }
 
 static AlgoVis *subgoal_init(const MapDef *map) {
-    memset(&state, 0, sizeof(state));
-    state.map = map;
-    vis_init_cells(&state.vis, map);
-    heap_init(&state.heap);
+    free(state);
+    state = calloc(1, sizeof(*state));
+    state->map = map;
+    vis_init_cells(&state->vis, map);
+    heap_init(&state->heap);
 
     int total = map->rows * map->cols;
     for (int i = 0; i < total; i++)
-        state.sg_idx[i] = -1;
+        state->sg_idx[i] = -1;
     for (int i = 0; i < MAX_SUBGOALS + 2; i++) {
-        state.cost[i] = INT_MAX;
-        state.parent[i] = -1;
+        state->cost[i] = INT_MAX;
+        state->parent[i] = -1;
     }
 
-    state.phase = 0;
-    state.scan_pos = 0;
-    state.start_sg = -1;
-    state.end_sg = -1;
+    state->phase = 0;
+    state->scan_pos = 0;
+    state->start_sg = -1;
+    state->end_sg = -1;
 
-    return &state.vis;
+    return &state->vis;
 }
 
 static int subgoal_step(AlgoVis *vis) {
