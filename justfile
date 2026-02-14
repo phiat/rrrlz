@@ -28,7 +28,7 @@ ida_star:
 
 # Build visualizer (SDL2, no LLVM pipeline)
 visualizer:
-    clang -O2 visualizer/visualizer.c -o visualizer/visualizer $(pkg-config --cflags --libs sdl2)
+    clang -O2 visualizer/visualizer.c visualizer/algo_dijkstra.c visualizer/algo_astar.c visualizer/algo_bellman_ford.c visualizer/algo_ida_star.c visualizer/algo_floyd_warshall.c -o visualizer/visualizer $(pkg-config --cflags --libs sdl2)
 
 # Run visualizer
 run: visualizer

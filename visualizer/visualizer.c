@@ -1,36 +1,35 @@
 /*
  * Grid Pathfinding Visualizer — SDL2
  *
- * Animates Dijkstra and A* step-by-step on the same 20x20 grid
- * used by the other programs in this project.
+ * Animates pathfinding algorithms step-by-step on 20x20 grids.
+ * Algorithm-agnostic: each algorithm is a plugin (AlgoPlugin).
  *
  * Controls:
  *   Space       Step one node expansion
  *   Enter       Run to completion (animated)
  *   R           Reset current algorithm
- *   1           Switch to Dijkstra
- *   2           Switch to A*
+ *   1           Dijkstra
+ *   2           A*
+ *   3           Bellman-Ford
+ *   4           IDA*
+ *   5           Floyd-Warshall
  *   Tab         Cycle maps (original, diagonal, arena, maze)
  *   +/-         Speed up / slow down animation
  *   Q / Escape  Quit
  *
  * Build:
- *   clang -O2 visualizer.c -o visualizer $(pkg-config --cflags --libs sdl2)
+ *   just visualizer
  */
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
 #include <string.h>
 
-/* ── Grid & Maps ──────────────────────────────────────────────────── */
+#include "algo.h"
 
-#define ROWS 20
-#define COLS 20
-#define MAX_NODES (ROWS * COLS)
+/* ── Maps ─────────────────────────────────────────────────────────── */
 
-/* Map 0: Original — scattered obstacles (same as dijkstra.c / astar.c) */
 static const int map_original[ROWS][COLS] = {
     {0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
     {0,1,1,0,0,1,0,1,1,0,1,1,0,0,1,0,1,1,0,0},
@@ -54,7 +53,6 @@ static const int map_original[ROWS][COLS] = {
     {0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0},
 };
 
-/* Map 1: Diagonal walls — two crossing diagonal barriers with gaps */
 static const int map_diagonal[ROWS][COLS] = {
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
@@ -78,7 +76,6 @@ static const int map_diagonal[ROWS][COLS] = {
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 };
 
-/* Map 2: Arena — open center with perimeter walls and scattered pillars */
 static const int map_arena[ROWS][COLS] = {
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0},
@@ -102,7 +99,6 @@ static const int map_arena[ROWS][COLS] = {
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 };
 
-/* Map 3: Maze — tight single-width corridors */
 static const int map_maze[ROWS][COLS] = {
     {0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0},
     {0,1,0,1,1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,0},
@@ -135,202 +131,50 @@ static const int (*maps[MAP_COUNT])[COLS] = {
 };
 static int current_map = 0;
 
-static const int START_R = 0, START_C = 0;
-static const int END_R = 19, END_C = 19;
+/* ── Algorithm plugins ────────────────────────────────────────────── */
 
-static const int DR[4] = {-1, 1, 0, 0};
-static const int DC[4] = {0, 0, -1, 1};
+extern AlgoPlugin algo_dijkstra;
+extern AlgoPlugin algo_astar;
+extern AlgoPlugin algo_bellman_ford;
+extern AlgoPlugin algo_ida_star;
+extern AlgoPlugin algo_floyd_warshall;
 
-static inline int get_index(int r, int c) { return r * COLS + c; }
+static AlgoPlugin *algorithms[] = {
+    &algo_dijkstra, &algo_astar, &algo_bellman_ford,
+    &algo_ida_star, &algo_floyd_warshall,
+};
+#define ALG_COUNT 5
 
-static inline int is_valid(int r, int c) {
-    return r >= 0 && r < ROWS && c >= 0 && c < COLS
-        && maps[current_map][r][c] == 0;
-}
+static int current_alg = 0;
+static AlgoVis *vis = NULL;
 
-static int manhattan(int r, int c) {
-    int dr = r - END_R;
-    int dc = c - END_C;
-    return (dr < 0 ? -dr : dr) + (dc < 0 ? -dc : dc);
-}
-
-/* ── Min-heap ─────────────────────────────────────────────────────── */
-
-typedef struct {
-    int node;
-    int priority;
-} HeapEntry;
-
-typedef struct {
-    HeapEntry data[MAX_NODES * 4]; /* allow duplicates */
-    int size;
-} Heap;
-
-static void heap_init(Heap *h) { h->size = 0; }
-
-static void heap_push(Heap *h, int node, int priority) {
-    int i = h->size++;
-    h->data[i].node = node;
-    h->data[i].priority = priority;
-    while (i > 0) {
-        int p = (i - 1) / 2;
-        if (h->data[p].priority <= h->data[i].priority) break;
-        HeapEntry tmp = h->data[i];
-        h->data[i] = h->data[p];
-        h->data[p] = tmp;
-        i = p;
-    }
-}
-
-static HeapEntry heap_pop(Heap *h) {
-    HeapEntry top = h->data[0];
-    h->data[0] = h->data[--h->size];
-    int i = 0;
-    for (;;) {
-        int l = 2 * i + 1, r = 2 * i + 2, s = i;
-        if (l < h->size && h->data[l].priority < h->data[s].priority) s = l;
-        if (r < h->size && h->data[r].priority < h->data[s].priority) s = r;
-        if (s == i) break;
-        HeapEntry tmp = h->data[i];
-        h->data[i] = h->data[s];
-        h->data[s] = tmp;
-        i = s;
-    }
-    return top;
-}
-
-/* ── Algorithm state ──────────────────────────────────────────────── */
-
-enum CellState {
-    CELL_EMPTY,
-    CELL_WALL,
-    CELL_OPEN,    /* in the open set (frontier) */
-    CELL_CLOSED,  /* expanded / visited */
-    CELL_PATH,
-    CELL_START,
-    CELL_END,
+/* Per-algorithm info bar colors */
+static const SDL_Color alg_colors[ALG_COUNT] = {
+    {255, 160, 80,  255},  /* Dijkstra: orange */
+    {100, 180, 255, 255},  /* A*: blue */
+    {50,  230, 100, 255},  /* Bellman-Ford: green */
+    {180, 100, 255, 255},  /* IDA*: purple */
+    {255, 220, 50,  255},  /* Floyd-Warshall: yellow */
 };
 
-enum Algorithm {
-    ALG_DIJKSTRA,
-    ALG_ASTAR,
-    ALG_COUNT,
-};
+/* ── Timing ───────────────────────────────────────────────────────── */
 
-static const char *alg_names[ALG_COUNT] = {"Dijkstra", "A*"};
+static double step_us  = 0.0;
+static double total_us = 0.0;
 
-typedef struct {
-    Heap heap;
-    int cost[MAX_NODES];      /* g-cost */
-    int parent[MAX_NODES];
-    int closed[MAX_NODES];
-    int in_open[MAX_NODES];   /* for coloring frontier */
-    int cell_state[MAX_NODES];
-    int done;                 /* search finished? */
-    int found;                /* path found? */
-    int nodes_explored;
-    int steps;            /* total heap pops (including stale skips) */
-    int path_len;
-    double step_us;       /* last step time in microseconds */
-    double total_us;      /* cumulative algo time in microseconds */
-    enum Algorithm alg;
-} SearchState;
-
-static void search_init(SearchState *s, enum Algorithm alg) {
-    memset(s, 0, sizeof(*s));
-    heap_init(&s->heap);
-    s->alg = alg;
-    s->done = 0;
-    s->found = 0;
-    s->nodes_explored = 0;
-    s->steps = 0;
-    s->path_len = 0;
-    s->step_us = 0.0;
-    s->total_us = 0.0;
-
-    for (int i = 0; i < MAX_NODES; i++) {
-        s->cost[i] = INT_MAX;
-        s->parent[i] = -1;
-        s->closed[i] = 0;
-        s->in_open[i] = 0;
-        int r = i / COLS, c = i % COLS;
-        s->cell_state[i] = maps[current_map][r][c] ? CELL_WALL : CELL_EMPTY;
-    }
-
-    int start = get_index(START_R, START_C);
-    s->cost[start] = 0;
-    s->in_open[start] = 1;
-    s->cell_state[start] = CELL_START;
-
-    int priority = (alg == ALG_ASTAR) ? manhattan(START_R, START_C) : 0;
-    heap_push(&s->heap, start, priority);
-
-    s->cell_state[get_index(END_R, END_C)] = CELL_END;
+static void timed_step(void) {
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    algorithms[current_alg]->step(vis);
+    Uint64 t1 = SDL_GetPerformanceCounter();
+    double us = (double)(t1 - t0) * 1e6 / (double)SDL_GetPerformanceFrequency();
+    step_us = us;
+    total_us += us;
 }
 
-/* Expand one node. Returns 1 if a step happened, 0 if done. */
-static int search_step(SearchState *s) {
-    if (s->done) return 0;
-    if (s->heap.size == 0) { s->done = 1; return 0; }
-
-    /* Pop next node */
-    HeapEntry cur = heap_pop(&s->heap);
-    int node = cur.node;
-    int r = node / COLS, c = node % COLS;
-    s->steps++;
-
-    if (s->closed[node]) return 1; /* skip stale entry, but count as a step */
-
-    s->closed[node] = 1;
-    s->in_open[node] = 0;
-    s->nodes_explored++;
-
-    /* Color it closed (preserve start/end markers) */
-    if (node != get_index(START_R, START_C) && node != get_index(END_R, END_C))
-        s->cell_state[node] = CELL_CLOSED;
-
-    int end = get_index(END_R, END_C);
-    if (node == end) {
-        s->done = 1;
-        s->found = 1;
-        /* Trace path */
-        int cur_node = end;
-        while (cur_node != -1) {
-            if (cur_node != get_index(START_R, START_C) &&
-                cur_node != get_index(END_R, END_C))
-                s->cell_state[cur_node] = CELL_PATH;
-            s->path_len++;
-            cur_node = s->parent[cur_node];
-        }
-        return 1;
-    }
-
-    /* Expand neighbors */
-    for (int d = 0; d < 4; d++) {
-        int nr = r + DR[d], nc = c + DC[d];
-        if (!is_valid(nr, nc)) continue;
-        int neighbor = get_index(nr, nc);
-        if (s->closed[neighbor]) continue;
-
-        int new_g = s->cost[node] + 1;
-        if (new_g < s->cost[neighbor]) {
-            s->cost[neighbor] = new_g;
-            s->parent[neighbor] = node;
-            s->in_open[neighbor] = 1;
-
-            int priority = new_g;
-            if (s->alg == ALG_ASTAR)
-                priority += manhattan(nr, nc);
-            heap_push(&s->heap, neighbor, priority);
-
-            /* Color frontier (preserve start/end) */
-            if (neighbor != get_index(START_R, START_C) &&
-                neighbor != get_index(END_R, END_C))
-                s->cell_state[neighbor] = CELL_OPEN;
-        }
-    }
-
-    return 1;
+static void init_algorithm(void) {
+    vis = algorithms[current_alg]->init(maps[current_map]);
+    step_us = 0.0;
+    total_us = 0.0;
 }
 
 /* ── Rendering ────────────────────────────────────────────────────── */
@@ -341,39 +185,36 @@ static int search_step(SearchState *s) {
 #define WIN_W     (COLS * CELL_SIZE)
 #define WIN_H     (ROWS * CELL_SIZE + INFO_H)
 
-/* Colors (R, G, B) */
-static const SDL_Color COL_BG       = {30,  30,  30,  255};
-static const SDL_Color COL_WALL     = {60,  60,  70,  255};
-static const SDL_Color COL_EMPTY    = {200, 200, 200, 255};
-static const SDL_Color COL_OPEN     = {100, 180, 255, 255};  /* frontier: blue */
-static const SDL_Color COL_CLOSED   = {255, 160, 80,  255};  /* visited: orange */
-static const SDL_Color COL_PATH     = {50,  230, 100, 255};  /* path: green */
-static const SDL_Color COL_START    = {255, 255, 60,  255};  /* yellow */
-static const SDL_Color COL_END      = {230, 50,  50,  255};  /* red */
-static const SDL_Color COL_GRID_LINE = {45, 45,  50,  255};
+static const SDL_Color COL_BG        = {30,  30,  30,  255};
+static const SDL_Color COL_WALL      = {60,  60,  70,  255};
+static const SDL_Color COL_EMPTY     = {200, 200, 200, 255};
+static const SDL_Color COL_OPEN      = {100, 180, 255, 255};
+static const SDL_Color COL_CLOSED    = {255, 160, 80,  255};
+static const SDL_Color COL_PATH      = {50,  230, 100, 255};
+static const SDL_Color COL_START     = {255, 255, 60,  255};
+static const SDL_Color COL_END       = {230, 50,  50,  255};
+static const SDL_Color COL_GRID_LINE = {45,  45,  50,  255};
 
 static SDL_Color cell_color(int state) {
     switch (state) {
-        case CELL_WALL:   return COL_WALL;
-        case CELL_OPEN:   return COL_OPEN;
-        case CELL_CLOSED: return COL_CLOSED;
-        case CELL_PATH:   return COL_PATH;
-        case CELL_START:  return COL_START;
-        case CELL_END:    return COL_END;
-        default:          return COL_EMPTY;
+        case VIS_WALL:   return COL_WALL;
+        case VIS_OPEN:   return COL_OPEN;
+        case VIS_CLOSED: return COL_CLOSED;
+        case VIS_PATH:   return COL_PATH;
+        case VIS_START:  return COL_START;
+        case VIS_END:    return COL_END;
+        default:         return COL_EMPTY;
     }
 }
 
-static void render_grid(SDL_Renderer *ren, SearchState *s) {
-    /* Background */
+static void render_grid(SDL_Renderer *ren) {
     SDL_SetRenderDrawColor(ren, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(ren);
 
-    /* Cells */
     for (int r = 0; r < ROWS; r++) {
         for (int c = 0; c < COLS; c++) {
             int idx = get_index(r, c);
-            SDL_Color col = cell_color(s->cell_state[idx]);
+            SDL_Color col = cell_color(vis->cells[idx]);
             SDL_Rect rect = {
                 c * CELL_SIZE + GRID_PAD,
                 r * CELL_SIZE + GRID_PAD,
@@ -385,7 +226,6 @@ static void render_grid(SDL_Renderer *ren, SearchState *s) {
         }
     }
 
-    /* Grid lines */
     SDL_SetRenderDrawColor(ren, COL_GRID_LINE.r, COL_GRID_LINE.g,
                            COL_GRID_LINE.b, 255);
     for (int r = 0; r <= ROWS; r++)
@@ -394,33 +234,31 @@ static void render_grid(SDL_Renderer *ren, SearchState *s) {
         SDL_RenderDrawLine(ren, c * CELL_SIZE, 0, c * CELL_SIZE, ROWS * CELL_SIZE);
 }
 
-/* Simple text via filled rects — no SDL_ttf needed */
 static void draw_char_block(SDL_Renderer *ren, int x, int y, int w, int h) {
     SDL_Rect r = {x, y, w, h};
     SDL_RenderFillRect(ren, &r);
 }
 
-static void render_info(SDL_Renderer *ren, SearchState *s, int step_ms) {
+static void render_info(SDL_Renderer *ren, int step_ms) {
     int y0 = ROWS * CELL_SIZE + 4;
 
-    /* Info bar background */
     SDL_Rect bar = {0, ROWS * CELL_SIZE, WIN_W, INFO_H};
     SDL_SetRenderDrawColor(ren, 20, 20, 25, 255);
     SDL_RenderFillRect(ren, &bar);
 
     /* Algorithm indicator — colored block */
-    SDL_Color ac = (s->alg == ALG_DIJKSTRA) ? COL_CLOSED : COL_OPEN;
+    SDL_Color ac = alg_colors[current_alg];
     SDL_SetRenderDrawColor(ren, ac.r, ac.g, ac.b, 255);
     draw_char_block(ren, 8, y0 + 4, 12, 12);
 
-    /* Status indicators on the right side */
-    if (s->done) {
-        SDL_Color sc = s->found ? COL_PATH : COL_END;
+    /* Status indicator */
+    if (vis->done) {
+        SDL_Color sc = vis->found ? COL_PATH : COL_END;
         SDL_SetRenderDrawColor(ren, sc.r, sc.g, sc.b, 255);
         draw_char_block(ren, WIN_W - 20, y0 + 4, 12, 12);
     }
 
-    /* Legend blocks at bottom */
+    /* Legend blocks */
     int lx = 8, ly = y0 + 28;
     struct { SDL_Color c; } legend[] = {
         {COL_EMPTY}, {COL_WALL}, {COL_OPEN}, {COL_CLOSED}, {COL_PATH},
@@ -433,61 +271,46 @@ static void render_info(SDL_Renderer *ren, SearchState *s, int step_ms) {
         lx += 22;
     }
 
-    /* Node count as bar width (proportional to explored / total open cells) */
+    /* Progress bar */
     int total_open = 0;
     for (int i = 0; i < MAX_NODES; i++)
         if (!maps[current_map][i / COLS][i % COLS]) total_open++;
-    int bar_w = (s->nodes_explored * (WIN_W - 16)) / (total_open > 0 ? total_open : 1);
+    int bar_w = (vis->nodes_explored * (WIN_W - 16)) / (total_open > 0 ? total_open : 1);
     if (bar_w > WIN_W - 16) bar_w = WIN_W - 16;
     SDL_SetRenderDrawColor(ren, 80, 80, 100, 255);
     SDL_Rect prog = {8, y0 + 48, bar_w, 6};
     SDL_RenderFillRect(ren, &prog);
 }
 
-/* ── Terminal stats (TUI) ─────────────────────────────────────────── */
+/* ── Terminal stats ───────────────────────────────────────────────── */
 
 #define STATS_LINES 4
 
-/* Perform a timed search step — updates step_us and total_us */
-static void timed_step(SearchState *s) {
-    Uint64 t0 = SDL_GetPerformanceCounter();
-    search_step(s);
-    Uint64 t1 = SDL_GetPerformanceCounter();
-    double us = (double)(t1 - t0) * 1e6 / (double)SDL_GetPerformanceFrequency();
-    s->step_us = us;
-    s->total_us += us;
-}
-
-static void print_stats(SearchState *s, int step_ms, int first) {
-    /* Move cursor up to overwrite previous stats (not on first print) */
+static void print_stats(int step_ms, int first) {
     if (!first)
         printf("\033[%dA", STATS_LINES);
 
-    const char *status = s->done ? (s->found ? "FOUND" : "NO PATH") : "searching";
-    int path_cost = s->found ? s->cost[get_index(END_R, END_C)] : -1;
+    const char *status = vis->done ? (vis->found ? "FOUND" : "NO PATH") : "searching";
+    int path_cost = vis->found ? vis->path_cost : -1;
 
-    /* Line 1: map + algo + status */
-    printf("\033[K  %-10s %-10s %s\n",
-           map_names[current_map], alg_names[s->alg], status);
+    printf("\033[K  %-10s %-14s %s\n",
+           map_names[current_map], algorithms[current_alg]->name, status);
 
-    /* Line 2: explored + steps + path */
     char step_buf[32], total_buf[32];
-    snprintf(step_buf, sizeof(step_buf), "%.1fus", s->step_us);
-    snprintf(total_buf, sizeof(total_buf), "%.1fus", s->total_us);
+    snprintf(step_buf, sizeof(step_buf), "%.1fus", step_us);
+    snprintf(total_buf, sizeof(total_buf), "%.1fus", total_us);
 
-    if (s->found)
+    if (vis->found)
         printf("\033[K  explored: %-8d steps: %-8d  path: %d (%d nodes)\n",
-               s->nodes_explored, s->steps, path_cost, s->path_len);
+               vis->nodes_explored, vis->steps, path_cost, vis->path_len);
     else
         printf("\033[K  explored: %-8d steps: %-8d  path: --\n",
-               s->nodes_explored, s->steps);
+               vis->nodes_explored, vis->steps);
 
-    /* Line 3: timing */
     printf("\033[K  step:     %-8s total: %-8s speed: %dms\n",
            step_buf, total_buf, step_ms);
 
-    /* Line 4: nodes/sec */
-    double nps = (s->total_us > 0.0) ? (s->nodes_explored * 1e6 / s->total_us) : 0.0;
+    double nps = (total_us > 0.0) ? (vis->nodes_explored * 1e6 / total_us) : 0.0;
     char nps_buf[32];
     snprintf(nps_buf, sizeof(nps_buf), "%.0f", nps);
     printf("\033[K  nodes/s:  %s\n", nps_buf);
@@ -526,22 +349,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    SearchState state;
-    enum Algorithm current_alg = ALG_DIJKSTRA;
-    search_init(&state, current_alg);
+    init_algorithm();
 
     int running = 1;
     int auto_run = 0;
     int step_ms = 40;
     Uint32 last_step = 0;
 
-    /* Print header + initial stats block */
     printf("Pathfinding Visualizer\n");
     printf("  Space = step       Enter = auto-run   R   = reset\n");
-    printf("  1     = Dijkstra   2     = A*         Tab = next map\n");
-    printf("  +/-   = speed      Q/Esc = quit\n");
+    printf("  1 = Dijkstra  2 = A*  3 = Bellman-Ford  4 = IDA*  5 = Floyd-Warshall\n");
+    printf("  Tab = next map     +/- = speed        Q/Esc = quit\n");
     printf("\n");
-    print_stats(&state, step_ms, 1);
+    print_stats(step_ms, 1);
 
     while (running) {
         SDL_Event ev;
@@ -556,28 +376,43 @@ int main(int argc, char *argv[]) {
                     break;
                 case SDLK_SPACE:
                     auto_run = 0;
-                    timed_step(&state);
+                    timed_step();
                     break;
                 case SDLK_RETURN:
                     auto_run = !auto_run;
                     break;
                 case SDLK_r:
-                    search_init(&state, current_alg);
+                    init_algorithm();
                     auto_run = 0;
                     break;
                 case SDLK_1:
-                    current_alg = ALG_DIJKSTRA;
-                    search_init(&state, current_alg);
+                    current_alg = 0;
+                    init_algorithm();
                     auto_run = 0;
                     break;
                 case SDLK_2:
-                    current_alg = ALG_ASTAR;
-                    search_init(&state, current_alg);
+                    current_alg = 1;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_3:
+                    current_alg = 2;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_4:
+                    current_alg = 3;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_5:
+                    current_alg = 4;
+                    init_algorithm();
                     auto_run = 0;
                     break;
                 case SDLK_TAB:
                     current_map = (current_map + 1) % MAP_COUNT;
-                    search_init(&state, current_alg);
+                    init_algorithm();
                     auto_run = 0;
                     break;
                 case SDLK_EQUALS:
@@ -593,27 +428,23 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* Auto-step */
-        if (auto_run && !state.done) {
+        if (auto_run && !vis->done) {
             Uint32 now = SDL_GetTicks();
             if (now - last_step >= (Uint32)step_ms) {
-                timed_step(&state);
+                timed_step();
                 last_step = now;
             }
         }
 
-        /* Render */
-        render_grid(ren, &state);
-        render_info(ren, &state, step_ms);
+        render_grid(ren);
+        render_info(ren, step_ms);
         SDL_RenderPresent(ren);
 
-        /* Update terminal stats */
-        print_stats(&state, step_ms, 0);
+        print_stats(step_ms, 0);
 
         SDL_Delay(8);
     }
 
-    /* Final newline so shell prompt doesn't clobber stats */
     printf("\n");
 
     SDL_DestroyRenderer(ren);
