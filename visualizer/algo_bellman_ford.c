@@ -1,8 +1,8 @@
 /*
  * algo_bellman_ford.c — Bellman-Ford step machine
  *
- * Builds an edge list at init, then relaxes one edge per step.
- * At the end of each pass, checks for changes and exits early if none.
+ * Builds an edge list at init, then relaxes all edges in one full pass per step.
+ * Checks for changes after each pass and exits early if none.
  */
 
 #include "algo.h"
@@ -24,7 +24,6 @@ typedef struct {
     int parent[MAX_NODES];
     int reached[MAX_NODES];   /* has this node ever been reached? */
     int bf_iter;              /* current pass number (0..V-1) */
-    int bf_edge_idx;          /* current edge within pass */
     int bf_changed;           /* did this pass relax anything? */
 } BellmanFordState;
 
@@ -61,7 +60,6 @@ static AlgoVis *bellman_ford_init(const int (*map)[COLS]) {
     state.reached[start] = 1;
 
     state.bf_iter = 0;
-    state.bf_edge_idx = 0;
     state.bf_changed = 0;
 
     return &state.vis;
@@ -74,13 +72,14 @@ static int bellman_ford_step(AlgoVis *vis) {
     /* No edges means no paths possible */
     if (s->edge_count == 0) { s->vis.done = 1; return 0; }
 
-    s->vis.steps++;
-
-    /* Relax one edge */
-    Edge *e = &s->edges[s->bf_edge_idx];
-    if (s->cost[e->from] != INT_MAX) {
+    /* One full pass over all edges per step */
+    s->bf_changed = 0;
+    for (int ei = 0; ei < s->edge_count; ei++) {
+        Edge *e = &s->edges[ei];
+        if (s->cost[e->from] == INT_MAX) continue;
         int new_cost = s->cost[e->from] + 1;
         if (new_cost < s->cost[e->to]) {
+            s->vis.relaxations++;
             s->cost[e->to] = new_cost;
             s->parent[e->to] = e->from;
             s->bf_changed = 1;
@@ -97,32 +96,25 @@ static int bellman_ford_step(AlgoVis *vis) {
         }
     }
 
-    s->bf_edge_idx++;
+    s->vis.steps++;
+    s->bf_iter++;
 
-    /* End of pass? */
-    if (s->bf_edge_idx >= s->edge_count) {
-        s->bf_edge_idx = 0;
-        s->bf_iter++;
-
-        if (!s->bf_changed || s->bf_iter >= MAX_NODES - 1) {
-            /* Done — mark all reached nodes as closed */
-            s->vis.done = 1;
-            for (int i = 0; i < MAX_NODES; i++) {
-                if (s->reached[i] &&
-                    i != get_index(START_R, START_C) &&
-                    i != get_index(END_R, END_C))
-                    s->vis.cells[i] = VIS_CLOSED;
-            }
-
-            int end = get_index(END_R, END_C);
-            if (s->cost[end] != INT_MAX) {
-                s->vis.found = 1;
-                vis_trace_path(&s->vis, s->parent, s->cost);
-            }
-            return 1;
+    if (!s->bf_changed || s->bf_iter >= MAX_NODES - 1) {
+        /* Done — mark all reached nodes as closed */
+        s->vis.done = 1;
+        for (int i = 0; i < MAX_NODES; i++) {
+            if (s->reached[i] &&
+                i != get_index(START_R, START_C) &&
+                i != get_index(END_R, END_C))
+                s->vis.cells[i] = VIS_CLOSED;
         }
 
-        s->bf_changed = 0;
+        int end = get_index(END_R, END_C);
+        if (s->cost[end] != INT_MAX) {
+            s->vis.found = 1;
+            vis_trace_path(&s->vis, s->parent, s->cost);
+        }
+        return 1;
     }
 
     return 1;

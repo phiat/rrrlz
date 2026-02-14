@@ -8,6 +8,7 @@
  *   Space       Step one node expansion
  *   Enter       Run to completion (animated)
  *   R           Reset current algorithm
+ *   B           Benchmark (instant run, accumulates comparison table)
  *   1           Dijkstra
  *   2           A*
  *   3           Bellman-Ford
@@ -284,7 +285,7 @@ static void render_info(SDL_Renderer *ren, int step_ms) {
 
 /* ── Terminal stats ───────────────────────────────────────────────── */
 
-#define STATS_LINES 4
+#define STATS_LINES 5
 
 static void print_stats(int step_ms, int first) {
     if (!first)
@@ -307,6 +308,8 @@ static void print_stats(int step_ms, int first) {
         printf("\033[K  explored: %-8d steps: %-8d  path: --\n",
                vis->nodes_explored, vis->steps);
 
+    printf("\033[K  relax:    %-8d\n", vis->relaxations);
+
     printf("\033[K  step:     %-8s total: %-8s speed: %dms\n",
            step_buf, total_buf, step_ms);
 
@@ -316,6 +319,57 @@ static void print_stats(int step_ms, int first) {
     printf("\033[K  nodes/s:  %s\n", nps_buf);
 
     fflush(stdout);
+}
+
+/* ── Benchmark mode ──────────────────────────────────────────────── */
+
+typedef struct {
+    const char *alg_name;
+    const char *map_name;
+    int path_cost;
+    int nodes_explored;
+    int relaxations;
+    double total_us;
+} BenchResult;
+
+#define BENCH_MAX 64
+static BenchResult bench_log[BENCH_MAX];
+static int bench_count = 0;
+
+static void run_benchmark(void) {
+    /* Re-init and run to completion without rendering */
+    init_algorithm();
+
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    while (algorithms[current_alg]->step(vis)) {}
+    Uint64 t1 = SDL_GetPerformanceCounter();
+
+    total_us = (double)(t1 - t0) * 1e6 / (double)SDL_GetPerformanceFrequency();
+    step_us = 0.0;
+
+    /* Record result */
+    if (bench_count < BENCH_MAX) {
+        bench_log[bench_count].alg_name = algorithms[current_alg]->name;
+        bench_log[bench_count].map_name = map_names[current_map];
+        bench_log[bench_count].path_cost = vis->found ? vis->path_cost : -1;
+        bench_log[bench_count].nodes_explored = vis->nodes_explored;
+        bench_log[bench_count].relaxations = vis->relaxations;
+        bench_log[bench_count].total_us = total_us;
+        bench_count++;
+    }
+
+    /* Print comparison table */
+    printf("\n\033[K\xe2\x94\x80\xe2\x94\x80 Benchmark \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n");
+    for (int i = 0; i < bench_count; i++) {
+        BenchResult *b = &bench_log[i];
+        printf("\033[K  %-14s %-10s cost:%-4d explored:%-5d relax:%-7d %.1fus\n",
+               b->alg_name, b->map_name, b->path_cost,
+               b->nodes_explored, b->relaxations, b->total_us);
+    }
+    printf("\033[K\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\n");
+
+    /* Re-print stats header so the live stats loop stays aligned */
+    print_stats(0, 1);
 }
 
 /* ── Main ─────────────────────────────────────────────────────────── */
@@ -357,7 +411,7 @@ int main(int argc, char *argv[]) {
     Uint32 last_step = 0;
 
     printf("Pathfinding Visualizer\n");
-    printf("  Space = step       Enter = auto-run   R   = reset\n");
+    printf("  Space = step       Enter = auto-run   R   = reset    B = benchmark\n");
     printf("  1 = Dijkstra  2 = A*  3 = Bellman-Ford  4 = IDA*  5 = Floyd-Warshall\n");
     printf("  Tab = next map     +/- = speed        Q/Esc = quit\n");
     printf("\n");
@@ -409,6 +463,10 @@ int main(int argc, char *argv[]) {
                     current_alg = 4;
                     init_algorithm();
                     auto_run = 0;
+                    break;
+                case SDLK_b:
+                    auto_run = 0;
+                    run_benchmark();
                     break;
                 case SDLK_TAB:
                     current_map = (current_map + 1) % MAP_COUNT;

@@ -113,6 +113,7 @@ static int ida_star_step(AlgoVis *vis) {
         }
 
         /* Push neighbor */
+        s->vis.relaxations++;
         s->on_path[neighbor] = 1;
         s->parent[neighbor] = node;
         s->cost[neighbor] = new_g;

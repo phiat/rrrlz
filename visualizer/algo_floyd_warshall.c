@@ -115,6 +115,7 @@ static int floyd_warshall_step(AlgoVis *vis) {
             if (dist[k][j] >= INF) continue;
             int through_k = dist[i][k] + dist[k][j];
             if (through_k < dist[i][j]) {
+                s->vis.relaxations++;
                 dist[i][j] = through_k;
                 nxt[i][j] = nxt[i][k];
             }

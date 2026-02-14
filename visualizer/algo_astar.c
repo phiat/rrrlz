@@ -67,6 +67,7 @@ static int astar_step(AlgoVis *vis) {
 
         int new_g = s->cost[node] + 1;
         if (new_g < s->cost[neighbor]) {
+            s->vis.relaxations++;
             s->cost[neighbor] = new_g;
             s->parent[neighbor] = node;
             heap_push(&s->heap, neighbor, new_g + manhattan(nr, nc));

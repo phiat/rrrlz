@@ -47,6 +47,7 @@ typedef struct {
     int steps;
     int path_len;
     int path_cost;
+    int relaxations;
 } AlgoVis;
 
 /* ── Plugin descriptor ────────────────────────────────────────────── */
@@ -85,6 +86,7 @@ static inline void vis_init_cells(AlgoVis *vis, const int (*map)[COLS]) {
     vis->steps = 0;
     vis->path_len = 0;
     vis->path_cost = 0;
+    vis->relaxations = 0;
 }
 
 /* Helper: trace path from end to start using parent array */
