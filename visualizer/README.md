@@ -1,17 +1,12 @@
 # Pathfinding Visualizer
 
-SDL2-based step-through visualizer for Dijkstra and A* on a 20x20 grid.
+SDL2-based step-through visualizer for 14 pathfinding algorithms on variable-size grids (up to 100x100).
 
 ## Build
 
 ```bash
-clang -O2 visualizer.c -o visualizer $(pkg-config --cflags --libs sdl2)
-```
-
-Or via just/build script:
-```bash
-just visualizer
-bash build_all.sh visualizer
+just visualizer    # standard build
+just check         # build with -Wall -Wextra
 ```
 
 ## Run
@@ -21,6 +16,25 @@ just run
 ./visualizer/visualizer
 ```
 
+## Algorithms
+
+| Key | Algorithm | Description |
+|---|---|---|
+| 1 | Dijkstra | Uniform-cost expansion |
+| 2 | A* | Manhattan heuristic-guided search |
+| 3 | Bellman-Ford | Edge relaxation, full-pass stepping |
+| 4 | IDA* | Iterative deepening with f-cost threshold |
+| 5 | Floyd-Warshall | All-pairs shortest paths |
+| 6 | JPS | Jump Point Search — prunes straight-line nodes |
+| 7 | Fringe | IDA* variant preserving frontier between iterations |
+| 8 | Flow Field | Reversed Dijkstra from goal producing vector field |
+| 9 | D* Lite | Incremental replanning (backward goal→start) |
+| 0 | Theta* | Any-angle A* with 8-dir movement and LOS shortcuts |
+| F1 | RSR | Rectangular Symmetry Reduction — A* on rectangle perimeters |
+| F2 | Subgoal | Subgoal Graphs — A* on obstacle-corner sparse graph |
+| F3 | CH | Contraction Hierarchies — bidirectional hierarchical search |
+| F4 | BiDir-A* | Bidirectional A* — two frontiers meeting in the middle |
+
 ## Controls
 
 | Key | Action |
@@ -28,20 +42,10 @@ just run
 | Space | Step one node expansion |
 | Enter | Toggle auto-run (animated) |
 | R | Reset current algorithm |
-| 1 | Switch to Dijkstra |
-| 2 | Switch to A* |
+| B | Benchmark (instant run, comparison table) |
 | Tab | Cycle maps |
 | +/- | Speed up / slow down |
 | Q / Esc | Quit |
-
-## Maps
-
-| # | Name | Description |
-|---|---|---|
-| 0 | Original | Same scattered-obstacle grid as dijkstra.c and astar.c |
-| 1 | Diagonal | Two crossing diagonal walls with gaps — simpler, shows heuristic advantage |
-| 2 | Arena | Open center with perimeter walls and pillars — watch the flood fill |
-| 3 | Maze | Tight single-width corridors — stress test for both algorithms |
 
 ## Colors
 
@@ -50,8 +54,9 @@ just run
 - **Blue** — open set (frontier)
 - **Orange** — closed set (visited/expanded)
 - **Green** — final path
-- **Yellow** — start (0,0)
-- **Red** — end (19,19)
+- **Yellow** — start
+- **Red** — end
+- **Dim teal** — preprocessing phase (RSR, Subgoal, CH)
 
 ## Requirements
 

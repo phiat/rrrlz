@@ -9,12 +9,9 @@
  *   Enter       Run to completion (animated)
  *   R           Reset current algorithm
  *   B           Benchmark (instant run, accumulates comparison table)
- *   1           Dijkstra
- *   2           A*
- *   3           Bellman-Ford
- *   4           IDA*
- *   5           Floyd-Warshall
- *   6           JPS
+ *   1-6         Dijkstra, A*, Bellman-Ford, IDA*, Floyd-Warshall, JPS
+ *   7-9, 0      Fringe, Flow Fields, D* Lite, Theta*
+ *   F1-F4       RSR, Subgoal Graphs, CH, BiDir-A*
  *   Tab         Cycle maps
  *   +/-         Speed up / slow down animation
  *   Q / Escape  Quit
@@ -43,12 +40,23 @@ extern AlgoPlugin algo_bellman_ford;
 extern AlgoPlugin algo_ida_star;
 extern AlgoPlugin algo_floyd_warshall;
 extern AlgoPlugin algo_jps;
+extern AlgoPlugin algo_fringe;
+extern AlgoPlugin algo_flowfield;
+extern AlgoPlugin algo_dstar_lite;
+extern AlgoPlugin algo_theta;
+extern AlgoPlugin algo_rsr;
+extern AlgoPlugin algo_subgoal;
+extern AlgoPlugin algo_ch;
+extern AlgoPlugin algo_anya;
 
-#define ALG_COUNT 6
+#define ALG_COUNT 14
 
 static AlgoPlugin *algorithms[ALG_COUNT] = {
     &algo_dijkstra, &algo_astar, &algo_bellman_ford,
     &algo_ida_star, &algo_floyd_warshall, &algo_jps,
+    &algo_fringe, &algo_flowfield, &algo_dstar_lite,
+    &algo_theta, &algo_rsr, &algo_subgoal,
+    &algo_ch, &algo_anya,
 };
 
 static int current_alg = 0;
@@ -56,12 +64,20 @@ static AlgoVis *vis = NULL;
 
 /* Per-algorithm info bar colors */
 static const SDL_Color alg_colors[ALG_COUNT] = {
-    {255, 160, 80,  255},  /* Dijkstra: orange */
-    {100, 180, 255, 255},  /* A*: blue */
-    {50,  230, 100, 255},  /* Bellman-Ford: green */
-    {180, 100, 255, 255},  /* IDA*: purple */
-    {255, 220, 50,  255},  /* Floyd-Warshall: yellow */
-    {80,  255, 220, 255},  /* JPS: cyan */
+    {255, 160, 80,  255},  /* 1  Dijkstra: orange */
+    {100, 180, 255, 255},  /* 2  A*: blue */
+    {50,  230, 100, 255},  /* 3  Bellman-Ford: green */
+    {180, 100, 255, 255},  /* 4  IDA*: purple */
+    {255, 220, 50,  255},  /* 5  Floyd-Warshall: yellow */
+    {80,  255, 220, 255},  /* 6  JPS: cyan */
+    {220, 180, 255, 255},  /* 7  Fringe: lavender */
+    {255, 120, 180, 255},  /* 8  Flow Fields: pink */
+    {120, 255, 120, 255},  /* 9  D* Lite: bright green */
+    {255, 200, 100, 255},  /* 0  Theta*: gold */
+    {100, 200, 200, 255},  /* F1 RSR: teal */
+    {200, 100, 100, 255},  /* F2 Subgoal: rust */
+    {150, 150, 255, 255},  /* F3 CH: periwinkle */
+    {255, 150, 50,  255},  /* F4 BiDir-A*: tangerine */
 };
 
 /* ── Dynamic rendering ───────────────────────────────────────────── */
@@ -136,16 +152,18 @@ static const SDL_Color COL_PATH      = {50,  230, 100, 255};
 static const SDL_Color COL_START     = {255, 255, 60,  255};
 static const SDL_Color COL_END       = {230, 50,  50,  255};
 static const SDL_Color COL_GRID_LINE = {45,  45,  50,  255};
+static const SDL_Color COL_PREPROCESS = {60, 120, 120, 255};
 
 static SDL_Color cell_color(int state) {
     switch (state) {
-        case VIS_WALL:   return COL_WALL;
-        case VIS_OPEN:   return COL_OPEN;
-        case VIS_CLOSED: return COL_CLOSED;
-        case VIS_PATH:   return COL_PATH;
-        case VIS_START:  return COL_START;
-        case VIS_END:    return COL_END;
-        default:         return COL_EMPTY;
+        case VIS_WALL:       return COL_WALL;
+        case VIS_OPEN:       return COL_OPEN;
+        case VIS_CLOSED:     return COL_CLOSED;
+        case VIS_PATH:       return COL_PATH;
+        case VIS_START:      return COL_START;
+        case VIS_END:        return COL_END;
+        case VIS_PREPROCESS: return COL_PREPROCESS;
+        default:             return COL_EMPTY;
     }
 }
 
@@ -188,7 +206,8 @@ static void draw_char_block(int x, int y, int w, int h) {
 }
 
 static void render_info(int step_ms) {
-    int rows = vis->rows, cols = vis->cols;
+    (void)step_ms;
+    int rows = vis->rows;
     int w = win_w();
     int y0 = rows * cell_size + 4;
 
@@ -251,7 +270,7 @@ static void print_stats(int step_ms, int first) {
         status = vis->done ? (vis->found ? "FOUND" : "NO PATH") : "searching";
     int path_cost = vis->found ? vis->path_cost : -1;
 
-    printf("\033[K  %-14s %-14s %s [%dx%d]\n",
+    printf("\033[K  %-16s %-14s %s [%dx%d]\n",
            m->name, algorithms[current_alg]->name, status, m->cols, m->rows);
 
     char step_buf[32], total_buf[32];
@@ -331,7 +350,7 @@ static void run_benchmark(void) {
     printf("\n\033[K\xe2\x94\x80\xe2\x94\x80 Benchmark \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n");
     for (int i = 0; i < bench_count; i++) {
         BenchResult *b = &bench_log[i];
-        printf("\033[K  %-14s %-14s %dx%-4d cost:%-4d explored:%-5d relax:%-7d %.1fus\n",
+        printf("\033[K  %-16s %-14s %dx%-4d cost:%-4d explored:%-5d relax:%-7d %.1fus\n",
                b->alg_name, b->map_name, b->map_cols, b->map_rows,
                b->path_cost, b->nodes_explored, b->relaxations, b->total_us);
     }
@@ -384,7 +403,8 @@ int main(int argc, char *argv[]) {
 
     printf("Pathfinding Visualizer\n");
     printf("  Space = step       Enter = auto-run   R   = reset    B = benchmark\n");
-    printf("  1 = Dijkstra  2 = A*  3 = Bellman-Ford  4 = IDA*  5 = Floyd-Warshall  6 = JPS\n");
+    printf("  1=Dijkstra 2=A* 3=BF 4=IDA* 5=FW 6=JPS 7=Fringe 8=FlowField 9=D*Lite 0=Theta*\n");
+    printf("  F1=RSR  F2=Subgoal  F3=CH  F4=BiDir-A*\n");
     printf("  Tab = next map     +/- = speed        Q/Esc = quit\n");
     printf("\n");
     print_stats(step_ms, 1);
@@ -438,6 +458,46 @@ int main(int argc, char *argv[]) {
                     break;
                 case SDLK_6:
                     current_alg = 5;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_7:
+                    current_alg = 6;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_8:
+                    current_alg = 7;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_9:
+                    current_alg = 8;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_0:
+                    current_alg = 9;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_F1:
+                    current_alg = 10;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_F2:
+                    current_alg = 11;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_F3:
+                    current_alg = 12;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
+                case SDLK_F4:
+                    current_alg = 13;
                     init_algorithm();
                     auto_run = 0;
                     break;

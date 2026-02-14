@@ -9,6 +9,7 @@
 #define ALGO_H
 
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 
 /* ── Grid upper bounds ───────────────────────────────────────────── */
@@ -19,6 +20,10 @@
 
 static const int DR[4] = {-1, 1, 0, 0};
 static const int DC[4] = {0, 0, -1, 1};
+
+/* 8-directional movement (for Theta*, any-angle algorithms) */
+static const int DR8[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+static const int DC8[8] = {0, 0, -1, 1, -1, 1, -1, 1};
 
 /* ── Map definition ──────────────────────────────────────────────── */
 
@@ -34,11 +39,12 @@ typedef struct {
 enum CellVis {
     VIS_EMPTY,
     VIS_WALL,
-    VIS_OPEN,     /* frontier / reachable */
-    VIS_CLOSED,   /* expanded / visited */
+    VIS_OPEN,       /* frontier / reachable */
+    VIS_CLOSED,     /* expanded / visited */
     VIS_PATH,
     VIS_START,
     VIS_END,
+    VIS_PREPROCESS, /* preprocessing phases (RSR, Subgoal, CH) */
 };
 
 /* ── Visualization state (first member of every algo state struct) ─ */
@@ -78,6 +84,40 @@ static inline int manhattan(int r, int c, int end_r, int end_c) {
 static inline int is_valid(const MapDef *map, int r, int c) {
     return r >= 0 && r < map->rows && c >= 0 && c < map->cols
         && map->data[r * map->cols + c] == 0;
+}
+
+/* Euclidean distance × 100 (integer, for Theta* priority) */
+static inline int euclidean100(int r1, int c1, int r2, int c2) {
+    int dr = r1 - r2, dc = c1 - c2;
+    return (int)(sqrt((double)(dr * dr + dc * dc)) * 100.0);
+}
+
+/* Bresenham line-of-sight check (for Theta*, Subgoal Graphs) */
+static inline int line_of_sight(const MapDef *map, int r1, int c1, int r2, int c2) {
+    int dr = r2 - r1 < 0 ? -(r2 - r1) : (r2 - r1);
+    int dc = c2 - c1 < 0 ? -(c2 - c1) : (c2 - c1);
+    int sr = r1 < r2 ? 1 : -1;
+    int sc = c1 < c2 ? 1 : -1;
+    int err = dr - dc;
+
+    int cr = r1, cc = c1;
+    while (cr != r2 || cc != c2) {
+        if (cr != r1 || cc != c1) {
+            if (cr < 0 || cr >= map->rows || cc < 0 || cc >= map->cols)
+                return 0;
+            if (map->data[cr * map->cols + cc] != 0)
+                return 0;
+        }
+        int e2 = 2 * err;
+        if (e2 > -dc) { err -= dc; cr += sr; }
+        if (e2 < dr) { err += dr; cc += sc; }
+    }
+    return 1;
+}
+
+/* Helper: check if cell is passable (raw, no bounds check) */
+static inline int is_passable(const int *data, int cols, int r, int c, int rows) {
+    return r >= 0 && r < rows && c >= 0 && c < cols && data[r * cols + c] == 0;
 }
 
 /* Helper: initialize cells array from map */

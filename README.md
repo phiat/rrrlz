@@ -12,7 +12,7 @@ A collection of C programs built through the LLVM toolchain at multiple optimiza
 | `bellman_ford/` | Bellman-Ford | Edge-relaxation shortest path, no heap, negative weight support |
 | `floyd_warshall/` | Floyd-Warshall | All-pairs shortest paths, O(V^3) triple-nested loop |
 | `ida_star/` | IDA* | Memory-efficient A* via iterative deepening with f-cost threshold |
-| `visualizer/` | SDL2 Visualizer | Step-through animation of Dijkstra and A* |
+| `visualizer/` | SDL2 Visualizer | Step-through animation of 14 pathfinding algorithms |
 
 ## How It Works
 
