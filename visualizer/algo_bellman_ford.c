@@ -12,12 +12,12 @@ typedef struct {
     int to;
 } Edge;
 
-/* Max edges: each cell has up to 4 neighbors, ~400 cells × 4 / 2 but stored directed */
+/* Max edges: each cell has up to 4 neighbors, stored directed */
 #define MAX_EDGES (MAX_NODES * 4)
 
 typedef struct {
     AlgoVis vis;
-    const int (*map)[COLS];
+    const MapDef *map;
     Edge edges[MAX_EDGES];
     int edge_count;
     int cost[MAX_NODES];
@@ -25,37 +25,40 @@ typedef struct {
     int reached[MAX_NODES];   /* has this node ever been reached? */
     int bf_iter;              /* current pass number (0..V-1) */
     int bf_changed;           /* did this pass relax anything? */
+    int total_nodes;          /* rows * cols for this map */
 } BellmanFordState;
 
 static BellmanFordState state;
 
-static AlgoVis *bellman_ford_init(const int (*map)[COLS]) {
+static AlgoVis *bellman_ford_init(const MapDef *map) {
     memset(&state, 0, sizeof(state));
     state.map = map;
     vis_init_cells(&state.vis, map);
+    state.total_nodes = map->rows * map->cols;
 
-    for (int i = 0; i < MAX_NODES; i++) {
+    for (int i = 0; i < state.total_nodes; i++) {
         state.cost[i] = INT_MAX;
         state.parent[i] = -1;
     }
 
     /* Build edge list */
+    int cols = map->cols;
     state.edge_count = 0;
-    for (int r = 0; r < ROWS; r++) {
-        for (int c = 0; c < COLS; c++) {
-            if (map[r][c]) continue;
-            int u = get_index(r, c);
+    for (int r = 0; r < map->rows; r++) {
+        for (int c = 0; c < map->cols; c++) {
+            if (map->data[r * cols + c]) continue;
+            int u = get_index(cols, r, c);
             for (int d = 0; d < 4; d++) {
                 int nr = r + DR[d], nc = c + DC[d];
                 if (!is_valid(map, nr, nc)) continue;
                 state.edges[state.edge_count].from = u;
-                state.edges[state.edge_count].to = get_index(nr, nc);
+                state.edges[state.edge_count].to = get_index(cols, nr, nc);
                 state.edge_count++;
             }
         }
     }
 
-    int start = get_index(START_R, START_C);
+    int start = state.vis.start_node;
     state.cost[start] = 0;
     state.reached[start] = 1;
 
@@ -90,8 +93,8 @@ static int bellman_ford_step(AlgoVis *vis) {
             }
 
             /* Color newly reached node */
-            if (e->to != get_index(START_R, START_C) &&
-                e->to != get_index(END_R, END_C))
+            if (e->to != s->vis.start_node &&
+                e->to != s->vis.end_node)
                 s->vis.cells[e->to] = VIS_OPEN;
         }
     }
@@ -99,17 +102,17 @@ static int bellman_ford_step(AlgoVis *vis) {
     s->vis.steps++;
     s->bf_iter++;
 
-    if (!s->bf_changed || s->bf_iter >= MAX_NODES - 1) {
+    if (!s->bf_changed || s->bf_iter >= s->total_nodes - 1) {
         /* Done — mark all reached nodes as closed */
         s->vis.done = 1;
-        for (int i = 0; i < MAX_NODES; i++) {
+        for (int i = 0; i < s->total_nodes; i++) {
             if (s->reached[i] &&
-                i != get_index(START_R, START_C) &&
-                i != get_index(END_R, END_C))
+                i != s->vis.start_node &&
+                i != s->vis.end_node)
                 s->vis.cells[i] = VIS_CLOSED;
         }
 
-        int end = get_index(END_R, END_C);
+        int end = s->vis.end_node;
         if (s->cost[end] != INT_MAX) {
             s->vis.found = 1;
             vis_trace_path(&s->vis, s->parent, s->cost);

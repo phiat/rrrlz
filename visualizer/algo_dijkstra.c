@@ -10,23 +10,24 @@ typedef struct {
     int cost[MAX_NODES];
     int parent[MAX_NODES];
     int closed[MAX_NODES];
-    const int (*map)[COLS];
+    const MapDef *map;
 } DijkstraState;
 
 static DijkstraState state;
 
-static AlgoVis *dijkstra_init(const int (*map)[COLS]) {
+static AlgoVis *dijkstra_init(const MapDef *map) {
     memset(&state, 0, sizeof(state));
     state.map = map;
     vis_init_cells(&state.vis, map);
     heap_init(&state.heap);
 
-    for (int i = 0; i < MAX_NODES; i++) {
+    int total = map->rows * map->cols;
+    for (int i = 0; i < total; i++) {
         state.cost[i] = INT_MAX;
         state.parent[i] = -1;
     }
 
-    int start = get_index(START_R, START_C);
+    int start = state.vis.start_node;
     state.cost[start] = 0;
     heap_push(&state.heap, start, 0);
 
@@ -40,7 +41,8 @@ static int dijkstra_step(AlgoVis *vis) {
 
     HeapEntry cur = heap_pop(&s->heap);
     int node = cur.node;
-    int r = node / COLS, c = node % COLS;
+    int cols = s->vis.cols;
+    int r = node / cols, c = node % cols;
     s->vis.steps++;
 
     if (s->closed[node]) return 1; /* stale entry */
@@ -48,11 +50,10 @@ static int dijkstra_step(AlgoVis *vis) {
     s->closed[node] = 1;
     s->vis.nodes_explored++;
 
-    if (node != get_index(START_R, START_C) && node != get_index(END_R, END_C))
+    if (node != s->vis.start_node && node != s->vis.end_node)
         s->vis.cells[node] = VIS_CLOSED;
 
-    int end = get_index(END_R, END_C);
-    if (node == end) {
+    if (node == s->vis.end_node) {
         s->vis.done = 1;
         s->vis.found = 1;
         vis_trace_path(&s->vis, s->parent, s->cost);
@@ -62,7 +63,7 @@ static int dijkstra_step(AlgoVis *vis) {
     for (int d = 0; d < 4; d++) {
         int nr = r + DR[d], nc = c + DC[d];
         if (!is_valid(s->map, nr, nc)) continue;
-        int neighbor = get_index(nr, nc);
+        int neighbor = get_index(cols, nr, nc);
         if (s->closed[neighbor]) continue;
 
         int new_g = s->cost[node] + 1;
@@ -72,8 +73,8 @@ static int dijkstra_step(AlgoVis *vis) {
             s->parent[neighbor] = node;
             heap_push(&s->heap, neighbor, new_g);
 
-            if (neighbor != get_index(START_R, START_C) &&
-                neighbor != get_index(END_R, END_C))
+            if (neighbor != s->vis.start_node &&
+                neighbor != s->vis.end_node)
                 s->vis.cells[neighbor] = VIS_OPEN;
         }
     }

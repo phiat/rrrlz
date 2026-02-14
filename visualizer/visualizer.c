@@ -1,7 +1,7 @@
 /*
  * Grid Pathfinding Visualizer — SDL2
  *
- * Animates pathfinding algorithms step-by-step on 20x20 grids.
+ * Animates pathfinding algorithms step-by-step on variable-size grids.
  * Algorithm-agnostic: each algorithm is a plugin (AlgoPlugin).
  *
  * Controls:
@@ -14,7 +14,8 @@
  *   3           Bellman-Ford
  *   4           IDA*
  *   5           Floyd-Warshall
- *   Tab         Cycle maps (original, diagonal, arena, maze)
+ *   6           JPS
+ *   Tab         Cycle maps
  *   +/-         Speed up / slow down animation
  *   Q / Escape  Quit
  *
@@ -28,123 +29,27 @@
 #include <string.h>
 
 #include "algo.h"
+#include "maps/maps.h"
 
-/* ── Maps ─────────────────────────────────────────────────────────── */
+/* ── Map state ────────────────────────────────────────────────────── */
 
-static const int map_original[ROWS][COLS] = {
-    {0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
-    {0,1,1,0,0,1,0,1,1,0,1,1,0,0,1,0,1,1,0,0},
-    {0,1,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0},
-    {0,0,0,1,1,1,0,0,1,0,0,0,0,1,1,1,0,0,0,0},
-    {0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,1,0},
-    {1,1,0,0,0,0,0,1,1,0,1,0,1,0,0,0,0,1,1,0},
-    {0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,1,0,0,0,0},
-    {0,1,0,1,0,1,1,0,0,0,0,1,0,0,0,1,0,1,0,0},
-    {0,1,0,0,0,0,0,0,0,1,0,1,0,1,0,0,0,0,0,1},
-    {0,0,0,0,1,0,1,0,0,1,0,0,0,1,0,0,1,0,0,0},
-    {0,1,1,0,1,0,1,0,0,0,0,0,1,0,0,0,1,0,1,0},
-    {0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0},
-    {0,0,1,1,0,1,0,0,1,0,1,0,0,1,1,0,0,1,0,0},
-    {0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0},
-    {1,1,0,0,0,0,0,1,0,1,0,1,0,0,0,1,0,0,0,0},
-    {0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1,0},
-    {0,1,0,1,0,1,0,0,0,0,1,0,0,1,0,0,1,0,1,0},
-    {0,1,0,0,0,1,0,0,1,0,0,0,0,1,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,1,0,1,0,0},
-    {0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0},
-};
-
-static const int map_diagonal[ROWS][COLS] = {
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0},
-    {0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
-    {0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0},
-    {0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-};
-
-static const int map_arena[ROWS][COLS] = {
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1,0},
-    {0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0},
-    {0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-};
-
-static const int map_maze[ROWS][COLS] = {
-    {0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0},
-    {0,1,0,1,1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,0},
-    {0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0},
-    {1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,1,1,0,1,0},
-    {0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0},
-    {0,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1,1,0,1,0},
-    {0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0},
-    {0,1,1,1,0,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1},
-    {0,0,0,1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0},
-    {1,1,0,1,1,1,0,1,1,1,0,1,1,0,1,1,1,1,1,0},
-    {0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0},
-    {0,1,1,1,1,1,0,1,0,1,1,0,1,0,1,1,1,1,1,0},
-    {0,0,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0},
-    {0,1,1,1,0,1,1,1,1,0,1,1,1,0,1,0,1,1,1,1},
-    {0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0},
-    {0,1,0,1,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,0},
-    {0,0,0,1,0,0,1,0,1,0,0,1,0,0,0,0,0,0,0,0},
-    {0,1,1,1,0,1,1,0,1,1,1,0,1,1,1,1,1,0,1,0},
-    {0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0},
-    {0,0,1,1,0,0,0,1,0,1,1,0,0,0,1,1,0,0,0,0},
-};
-
-#define MAP_COUNT 4
-static const char *map_names[MAP_COUNT] = {
-    "Original", "Diagonal", "Arena", "Maze"
-};
-static const int (*maps[MAP_COUNT])[COLS] = {
-    map_original, map_diagonal, map_arena, map_maze
-};
 static int current_map = 0;
 
-/* ── Algorithm plugins ────────────────────────────────────────────── */
+/* ── Algorithm plugins ───────────────────────────────────────────── */
 
 extern AlgoPlugin algo_dijkstra;
 extern AlgoPlugin algo_astar;
 extern AlgoPlugin algo_bellman_ford;
 extern AlgoPlugin algo_ida_star;
 extern AlgoPlugin algo_floyd_warshall;
+extern AlgoPlugin algo_jps;
 
-static AlgoPlugin *algorithms[] = {
+#define ALG_COUNT 6
+
+static AlgoPlugin *algorithms[ALG_COUNT] = {
     &algo_dijkstra, &algo_astar, &algo_bellman_ford,
-    &algo_ida_star, &algo_floyd_warshall,
+    &algo_ida_star, &algo_floyd_warshall, &algo_jps,
 };
-#define ALG_COUNT 5
 
 static int current_alg = 0;
 static AlgoVis *vis = NULL;
@@ -156,9 +61,34 @@ static const SDL_Color alg_colors[ALG_COUNT] = {
     {50,  230, 100, 255},  /* Bellman-Ford: green */
     {180, 100, 255, 255},  /* IDA*: purple */
     {255, 220, 50,  255},  /* Floyd-Warshall: yellow */
+    {80,  255, 220, 255},  /* JPS: cyan */
 };
 
-/* ── Timing ───────────────────────────────────────────────────────── */
+/* ── Dynamic rendering ───────────────────────────────────────────── */
+
+#define INFO_H    60
+#define GRID_PAD  1
+#define MIN_CELL  4
+#define MAX_CELL  32
+#define MAX_WIN   800
+
+static int cell_size = 32;
+static SDL_Window *win = NULL;
+static SDL_Renderer *ren = NULL;
+
+static int win_w(void) { return all_maps[current_map]->cols * cell_size; }
+static int win_h(void) { return all_maps[current_map]->rows * cell_size + INFO_H; }
+
+static void update_cell_size(void) {
+    const MapDef *m = all_maps[current_map];
+    int cw = MAX_WIN / m->cols;
+    int ch = MAX_WIN / m->rows;
+    cell_size = cw < ch ? cw : ch;
+    if (cell_size < MIN_CELL) cell_size = MIN_CELL;
+    if (cell_size > MAX_CELL) cell_size = MAX_CELL;
+}
+
+/* ── Timing ──────────────────────────────────────────────────────── */
 
 static double step_us  = 0.0;
 static double total_us = 0.0;
@@ -173,18 +103,29 @@ static void timed_step(void) {
 }
 
 static void init_algorithm(void) {
-    vis = algorithms[current_alg]->init(maps[current_map]);
+    const MapDef *m = all_maps[current_map];
+    int total = m->rows * m->cols;
+
+    /* Check if algorithm has a node cap and the map exceeds it */
+    if (algorithms[current_alg]->max_nodes > 0 &&
+        total > algorithms[current_alg]->max_nodes) {
+        /* Init with the map but mark as done immediately */
+        vis = algorithms[current_alg]->init(m);
+        vis->done = 1;
+        vis->found = 0;
+    } else {
+        vis = algorithms[current_alg]->init(m);
+    }
+
+    update_cell_size();
+    if (win)
+        SDL_SetWindowSize(win, win_w(), win_h());
+
     step_us = 0.0;
     total_us = 0.0;
 }
 
-/* ── Rendering ────────────────────────────────────────────────────── */
-
-#define CELL_SIZE 32
-#define GRID_PAD  1
-#define INFO_H    60
-#define WIN_W     (COLS * CELL_SIZE)
-#define WIN_H     (ROWS * CELL_SIZE + INFO_H)
+/* ── Rendering ───────────────────────────────────────────────────── */
 
 static const SDL_Color COL_BG        = {30,  30,  30,  255};
 static const SDL_Color COL_WALL      = {60,  60,  70,  255};
@@ -208,55 +149,63 @@ static SDL_Color cell_color(int state) {
     }
 }
 
-static void render_grid(SDL_Renderer *ren) {
+static void render_grid(void) {
+    int rows = vis->rows, cols = vis->cols;
+    int gw = cols * cell_size, gh = rows * cell_size;
+
     SDL_SetRenderDrawColor(ren, COL_BG.r, COL_BG.g, COL_BG.b, 255);
     SDL_RenderClear(ren);
 
-    for (int r = 0; r < ROWS; r++) {
-        for (int c = 0; c < COLS; c++) {
-            int idx = get_index(r, c);
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            int idx = get_index(cols, r, c);
             SDL_Color col = cell_color(vis->cells[idx]);
             SDL_Rect rect = {
-                c * CELL_SIZE + GRID_PAD,
-                r * CELL_SIZE + GRID_PAD,
-                CELL_SIZE - 2 * GRID_PAD,
-                CELL_SIZE - 2 * GRID_PAD
+                c * cell_size + GRID_PAD,
+                r * cell_size + GRID_PAD,
+                cell_size - 2 * GRID_PAD,
+                cell_size - 2 * GRID_PAD
             };
             SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, 255);
             SDL_RenderFillRect(ren, &rect);
         }
     }
 
-    SDL_SetRenderDrawColor(ren, COL_GRID_LINE.r, COL_GRID_LINE.g,
-                           COL_GRID_LINE.b, 255);
-    for (int r = 0; r <= ROWS; r++)
-        SDL_RenderDrawLine(ren, 0, r * CELL_SIZE, WIN_W, r * CELL_SIZE);
-    for (int c = 0; c <= COLS; c++)
-        SDL_RenderDrawLine(ren, c * CELL_SIZE, 0, c * CELL_SIZE, ROWS * CELL_SIZE);
+    /* Grid lines (skip if cells are very small) */
+    if (cell_size >= 6) {
+        SDL_SetRenderDrawColor(ren, COL_GRID_LINE.r, COL_GRID_LINE.g,
+                               COL_GRID_LINE.b, 255);
+        for (int r = 0; r <= rows; r++)
+            SDL_RenderDrawLine(ren, 0, r * cell_size, gw, r * cell_size);
+        for (int c = 0; c <= cols; c++)
+            SDL_RenderDrawLine(ren, c * cell_size, 0, c * cell_size, gh);
+    }
 }
 
-static void draw_char_block(SDL_Renderer *ren, int x, int y, int w, int h) {
+static void draw_char_block(int x, int y, int w, int h) {
     SDL_Rect r = {x, y, w, h};
     SDL_RenderFillRect(ren, &r);
 }
 
-static void render_info(SDL_Renderer *ren, int step_ms) {
-    int y0 = ROWS * CELL_SIZE + 4;
+static void render_info(int step_ms) {
+    int rows = vis->rows, cols = vis->cols;
+    int w = win_w();
+    int y0 = rows * cell_size + 4;
 
-    SDL_Rect bar = {0, ROWS * CELL_SIZE, WIN_W, INFO_H};
+    SDL_Rect bar = {0, rows * cell_size, w, INFO_H};
     SDL_SetRenderDrawColor(ren, 20, 20, 25, 255);
     SDL_RenderFillRect(ren, &bar);
 
     /* Algorithm indicator — colored block */
     SDL_Color ac = alg_colors[current_alg];
     SDL_SetRenderDrawColor(ren, ac.r, ac.g, ac.b, 255);
-    draw_char_block(ren, 8, y0 + 4, 12, 12);
+    draw_char_block(8, y0 + 4, 12, 12);
 
     /* Status indicator */
     if (vis->done) {
         SDL_Color sc = vis->found ? COL_PATH : COL_END;
         SDL_SetRenderDrawColor(ren, sc.r, sc.g, sc.b, 255);
-        draw_char_block(ren, WIN_W - 20, y0 + 4, 12, 12);
+        draw_char_block(w - 20, y0 + 4, 12, 12);
     }
 
     /* Legend blocks */
@@ -268,22 +217,24 @@ static void render_info(SDL_Renderer *ren, int step_ms) {
     for (int i = 0; i < 7; i++) {
         SDL_SetRenderDrawColor(ren, legend[i].c.r, legend[i].c.g,
                                legend[i].c.b, 255);
-        draw_char_block(ren, lx, ly, 14, 14);
+        draw_char_block(lx, ly, 14, 14);
         lx += 22;
     }
 
     /* Progress bar */
+    const MapDef *m = all_maps[current_map];
+    int total = m->rows * m->cols;
     int total_open = 0;
-    for (int i = 0; i < MAX_NODES; i++)
-        if (!maps[current_map][i / COLS][i % COLS]) total_open++;
-    int bar_w = (vis->nodes_explored * (WIN_W - 16)) / (total_open > 0 ? total_open : 1);
-    if (bar_w > WIN_W - 16) bar_w = WIN_W - 16;
+    for (int i = 0; i < total; i++)
+        if (m->data[i] == 0) total_open++;
+    int bar_w = (vis->nodes_explored * (w - 16)) / (total_open > 0 ? total_open : 1);
+    if (bar_w > w - 16) bar_w = w - 16;
     SDL_SetRenderDrawColor(ren, 80, 80, 100, 255);
     SDL_Rect prog = {8, y0 + 48, bar_w, 6};
     SDL_RenderFillRect(ren, &prog);
 }
 
-/* ── Terminal stats ───────────────────────────────────────────────── */
+/* ── Terminal stats ──────────────────────────────────────────────── */
 
 #define STATS_LINES 5
 
@@ -291,11 +242,17 @@ static void print_stats(int step_ms, int first) {
     if (!first)
         printf("\033[%dA", STATS_LINES);
 
-    const char *status = vis->done ? (vis->found ? "FOUND" : "NO PATH") : "searching";
+    const MapDef *m = all_maps[current_map];
+    const char *status;
+    if (algorithms[current_alg]->max_nodes > 0 &&
+        m->rows * m->cols > algorithms[current_alg]->max_nodes)
+        status = "SKIPPED (too large)";
+    else
+        status = vis->done ? (vis->found ? "FOUND" : "NO PATH") : "searching";
     int path_cost = vis->found ? vis->path_cost : -1;
 
-    printf("\033[K  %-10s %-14s %s\n",
-           map_names[current_map], algorithms[current_alg]->name, status);
+    printf("\033[K  %-14s %-14s %s [%dx%d]\n",
+           m->name, algorithms[current_alg]->name, status, m->cols, m->rows);
 
     char step_buf[32], total_buf[32];
     snprintf(step_buf, sizeof(step_buf), "%.1fus", step_us);
@@ -326,6 +283,7 @@ static void print_stats(int step_ms, int first) {
 typedef struct {
     const char *alg_name;
     const char *map_name;
+    int map_rows, map_cols;
     int path_cost;
     int nodes_explored;
     int relaxations;
@@ -340,6 +298,15 @@ static void run_benchmark(void) {
     /* Re-init and run to completion without rendering */
     init_algorithm();
 
+    const MapDef *m = all_maps[current_map];
+
+    /* Skip if algorithm can't handle this map size */
+    if (algorithms[current_alg]->max_nodes > 0 &&
+        m->rows * m->cols > algorithms[current_alg]->max_nodes) {
+        print_stats(0, 1);
+        return;
+    }
+
     Uint64 t0 = SDL_GetPerformanceCounter();
     while (algorithms[current_alg]->step(vis)) {}
     Uint64 t1 = SDL_GetPerformanceCounter();
@@ -350,7 +317,9 @@ static void run_benchmark(void) {
     /* Record result */
     if (bench_count < BENCH_MAX) {
         bench_log[bench_count].alg_name = algorithms[current_alg]->name;
-        bench_log[bench_count].map_name = map_names[current_map];
+        bench_log[bench_count].map_name = m->name;
+        bench_log[bench_count].map_rows = m->rows;
+        bench_log[bench_count].map_cols = m->cols;
         bench_log[bench_count].path_cost = vis->found ? vis->path_cost : -1;
         bench_log[bench_count].nodes_explored = vis->nodes_explored;
         bench_log[bench_count].relaxations = vis->relaxations;
@@ -362,9 +331,9 @@ static void run_benchmark(void) {
     printf("\n\033[K\xe2\x94\x80\xe2\x94\x80 Benchmark \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n");
     for (int i = 0; i < bench_count; i++) {
         BenchResult *b = &bench_log[i];
-        printf("\033[K  %-14s %-10s cost:%-4d explored:%-5d relax:%-7d %.1fus\n",
-               b->alg_name, b->map_name, b->path_cost,
-               b->nodes_explored, b->relaxations, b->total_us);
+        printf("\033[K  %-14s %-14s %dx%-4d cost:%-4d explored:%-5d relax:%-7d %.1fus\n",
+               b->alg_name, b->map_name, b->map_cols, b->map_rows,
+               b->path_cost, b->nodes_explored, b->relaxations, b->total_us);
     }
     printf("\033[K\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n\n");
 
@@ -372,7 +341,7 @@ static void run_benchmark(void) {
     print_stats(0, 1);
 }
 
-/* ── Main ─────────────────────────────────────────────────────────── */
+/* ── Main ────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
     (void)argc; (void)argv;
@@ -382,10 +351,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    SDL_Window *win = SDL_CreateWindow(
+    /* Init with first map to get initial window size */
+    update_cell_size();
+
+    win = SDL_CreateWindow(
         "rrrlz — Pathfinding Visualizer",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WIN_W, WIN_H, 0
+        win_w(), win_h(), SDL_WINDOW_RESIZABLE
     );
     if (!win) {
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
@@ -393,7 +365,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (!ren)
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     if (!ren) {
@@ -412,7 +384,7 @@ int main(int argc, char *argv[]) {
 
     printf("Pathfinding Visualizer\n");
     printf("  Space = step       Enter = auto-run   R   = reset    B = benchmark\n");
-    printf("  1 = Dijkstra  2 = A*  3 = Bellman-Ford  4 = IDA*  5 = Floyd-Warshall\n");
+    printf("  1 = Dijkstra  2 = A*  3 = Bellman-Ford  4 = IDA*  5 = Floyd-Warshall  6 = JPS\n");
     printf("  Tab = next map     +/- = speed        Q/Esc = quit\n");
     printf("\n");
     print_stats(step_ms, 1);
@@ -464,6 +436,11 @@ int main(int argc, char *argv[]) {
                     init_algorithm();
                     auto_run = 0;
                     break;
+                case SDLK_6:
+                    current_alg = 5;
+                    init_algorithm();
+                    auto_run = 0;
+                    break;
                 case SDLK_b:
                     auto_run = 0;
                     run_benchmark();
@@ -494,8 +471,8 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        render_grid(ren);
-        render_info(ren, step_ms);
+        render_grid();
+        render_info(step_ms);
         SDL_RenderPresent(ren);
 
         print_stats(step_ms, 0);

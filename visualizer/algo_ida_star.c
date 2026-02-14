@@ -18,7 +18,7 @@ typedef struct {
 
 typedef struct {
     AlgoVis vis;
-    const int (*map)[COLS];
+    const MapDef *map;
     StackFrame stack[IDA_MAX_STACK];
     int sp;                    /* stack pointer */
     int threshold;
@@ -32,20 +32,21 @@ typedef struct {
 static IDAStarState state;
 
 static void ida_start_iteration(IDAStarState *s) {
+    int total = s->map->rows * s->map->cols;
     s->sp = 0;
     s->next_threshold = INT_MAX;
-    memset(s->on_path, 0, sizeof(s->on_path));
-    memset(s->visited, 0, sizeof(s->visited));
+    memset(s->on_path, 0, total * sizeof(int));
+    memset(s->visited, 0, total * sizeof(int));
 
     /* Reset cell colors (keep walls, start, end) */
-    for (int i = 0; i < MAX_NODES; i++) {
+    for (int i = 0; i < total; i++) {
         if (s->vis.cells[i] != VIS_WALL &&
-            i != get_index(START_R, START_C) &&
-            i != get_index(END_R, END_C))
+            i != s->vis.start_node &&
+            i != s->vis.end_node)
             s->vis.cells[i] = VIS_EMPTY;
     }
 
-    int start = get_index(START_R, START_C);
+    int start = s->vis.start_node;
     s->stack[0].node = start;
     s->stack[0].g = 0;
     s->stack[0].next_dir = 0;
@@ -54,18 +55,20 @@ static void ida_start_iteration(IDAStarState *s) {
     s->visited[start] = 1;
 }
 
-static AlgoVis *ida_star_init(const int (*map)[COLS]) {
+static AlgoVis *ida_star_init(const MapDef *map) {
     memset(&state, 0, sizeof(state));
     state.map = map;
     vis_init_cells(&state.vis, map);
 
-    for (int i = 0; i < MAX_NODES; i++) {
+    int total = map->rows * map->cols;
+    for (int i = 0; i < total; i++) {
         state.parent[i] = -1;
         state.cost[i] = INT_MAX;
     }
-    state.cost[get_index(START_R, START_C)] = 0;
+    state.cost[state.vis.start_node] = 0;
 
-    state.threshold = manhattan(START_R, START_C);
+    state.threshold = manhattan(map->start_r, map->start_c,
+                                map->end_r, map->end_c);
     ida_start_iteration(&state);
 
     return &state.vis;
@@ -75,6 +78,7 @@ static int ida_star_step(AlgoVis *vis) {
     IDAStarState *s = (IDAStarState *)vis;
     if (s->vis.done) return 0;
 
+    int cols = s->vis.cols;
     s->vis.steps++;
 
     /* Stack empty → need new iteration */
@@ -91,7 +95,7 @@ static int ida_star_step(AlgoVis *vis) {
 
     StackFrame *top = &s->stack[s->sp - 1];
     int node = top->node;
-    int r = node / COLS, c = node % COLS;
+    int r = node / cols, c = node % cols;
     int g = top->g;
 
     /* Try to expand to next direction */
@@ -100,11 +104,11 @@ static int ida_star_step(AlgoVis *vis) {
         int nr = r + DR[d], nc = c + DC[d];
         if (!is_valid(s->map, nr, nc)) continue;
 
-        int neighbor = get_index(nr, nc);
+        int neighbor = get_index(cols, nr, nc);
         if (s->on_path[neighbor]) continue;
 
         int new_g = g + 1;
-        int f = new_g + manhattan(nr, nc);
+        int f = new_g + manhattan(nr, nc, s->map->end_r, s->map->end_c);
 
         if (f > s->threshold) {
             if (f < s->next_threshold)
@@ -124,12 +128,12 @@ static int ida_star_step(AlgoVis *vis) {
         }
 
         /* Color: on current path */
-        if (neighbor != get_index(START_R, START_C) &&
-            neighbor != get_index(END_R, END_C))
+        if (neighbor != s->vis.start_node &&
+            neighbor != s->vis.end_node)
             s->vis.cells[neighbor] = VIS_OPEN;
 
         /* Check if we found the goal */
-        if (neighbor == get_index(END_R, END_C)) {
+        if (neighbor == s->vis.end_node) {
             s->vis.done = 1;
             s->vis.found = 1;
             vis_trace_path(&s->vis, s->parent, s->cost);
@@ -151,8 +155,8 @@ static int ida_star_step(AlgoVis *vis) {
     s->sp--;
     s->on_path[node] = 0;
 
-    if (node != get_index(START_R, START_C) &&
-        node != get_index(END_R, END_C))
+    if (node != s->vis.start_node &&
+        node != s->vis.end_node)
         s->vis.cells[node] = VIS_CLOSED;
 
     return 1;

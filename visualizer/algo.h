@@ -11,21 +11,25 @@
 #include <limits.h>
 #include <string.h>
 
-/* ── Grid constants ───────────────────────────────────────────────── */
+/* ── Grid upper bounds ───────────────────────────────────────────── */
 
-#define ROWS 20
-#define COLS 20
-#define MAX_NODES (ROWS * COLS)
-
-#define START_R 0
-#define START_C 0
-#define END_R   19
-#define END_C   19
+#define MAX_ROWS 100
+#define MAX_COLS 100
+#define MAX_NODES (MAX_ROWS * MAX_COLS)
 
 static const int DR[4] = {-1, 1, 0, 0};
 static const int DC[4] = {0, 0, -1, 1};
 
-/* ── Cell visualization enum ──────────────────────────────────────── */
+/* ── Map definition ──────────────────────────────────────────────── */
+
+typedef struct {
+    const char *name;
+    int rows, cols;
+    int start_r, start_c, end_r, end_c;
+    const int *data;  /* flat row-major array */
+} MapDef;
+
+/* ── Cell visualization enum ─────────────────────────────────────── */
 
 enum CellVis {
     VIS_EMPTY,
@@ -48,38 +52,49 @@ typedef struct {
     int path_len;
     int path_cost;
     int relaxations;
+    int rows, cols;
+    int start_node, end_node;
 } AlgoVis;
 
-/* ── Plugin descriptor ────────────────────────────────────────────── */
+/* ── Plugin descriptor ───────────────────────────────────────────── */
 
 typedef struct {
     const char *name;
-    AlgoVis *(*init)(const int (*map)[COLS]);
+    AlgoVis *(*init)(const MapDef *map);
     int      (*step)(AlgoVis *vis);
+    int      max_nodes;  /* 0=unlimited, >0=skip if map has more nodes */
 } AlgoPlugin;
 
-/* ── Inline helpers ───────────────────────────────────────────────── */
+/* ── Inline helpers ──────────────────────────────────────────────── */
 
-static inline int get_index(int r, int c) { return r * COLS + c; }
+static inline int get_index(int cols, int r, int c) { return r * cols + c; }
 
-static inline int manhattan(int r, int c) {
-    int dr = r - END_R;
-    int dc = c - END_C;
+static inline int manhattan(int r, int c, int end_r, int end_c) {
+    int dr = r - end_r;
+    int dc = c - end_c;
     return (dr < 0 ? -dr : dr) + (dc < 0 ? -dc : dc);
 }
 
-static inline int is_valid(const int (*map)[COLS], int r, int c) {
-    return r >= 0 && r < ROWS && c >= 0 && c < COLS && map[r][c] == 0;
+static inline int is_valid(const MapDef *map, int r, int c) {
+    return r >= 0 && r < map->rows && c >= 0 && c < map->cols
+        && map->data[r * map->cols + c] == 0;
 }
 
 /* Helper: initialize cells array from map */
-static inline void vis_init_cells(AlgoVis *vis, const int (*map)[COLS]) {
-    for (int i = 0; i < MAX_NODES; i++) {
-        int r = i / COLS, c = i % COLS;
-        vis->cells[i] = map[r][c] ? VIS_WALL : VIS_EMPTY;
-    }
-    vis->cells[get_index(START_R, START_C)] = VIS_START;
-    vis->cells[get_index(END_R, END_C)] = VIS_END;
+static inline void vis_init_cells(AlgoVis *vis, const MapDef *map) {
+    int total = map->rows * map->cols;
+    vis->rows = map->rows;
+    vis->cols = map->cols;
+    vis->start_node = get_index(map->cols, map->start_r, map->start_c);
+    vis->end_node = get_index(map->cols, map->end_r, map->end_c);
+
+    for (int i = 0; i < total; i++)
+        vis->cells[i] = map->data[i] ? VIS_WALL : VIS_EMPTY;
+    for (int i = total; i < MAX_NODES; i++)
+        vis->cells[i] = VIS_EMPTY;
+
+    vis->cells[vis->start_node] = VIS_START;
+    vis->cells[vis->end_node] = VIS_END;
     vis->done = 0;
     vis->found = 0;
     vis->nodes_explored = 0;
@@ -91,18 +106,18 @@ static inline void vis_init_cells(AlgoVis *vis, const int (*map)[COLS]) {
 
 /* Helper: trace path from end to start using parent array */
 static inline void vis_trace_path(AlgoVis *vis, const int *parent, const int *cost) {
-    int end = get_index(END_R, END_C);
+    int end = vis->end_node;
     vis->path_cost = cost[end];
     int cur = end;
     while (cur != -1) {
-        if (cur != get_index(START_R, START_C) && cur != get_index(END_R, END_C))
+        if (cur != vis->start_node && cur != vis->end_node)
             vis->cells[cur] = VIS_PATH;
         vis->path_len++;
         cur = parent[cur];
     }
 }
 
-/* ── Min-heap (used by Dijkstra and A*) ───────────────────────────── */
+/* ── Min-heap (used by Dijkstra, A*, JPS) ────────────────────────── */
 
 typedef struct {
     int node;
