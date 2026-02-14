@@ -49,9 +49,10 @@ extern AlgoPlugin algo_subgoal;
 extern AlgoPlugin algo_ch;
 extern AlgoPlugin algo_anya;
 
-#define ALG_COUNT 14
+#define ALG_MAX 14
 
-static AlgoPlugin *algorithms[ALG_COUNT] = {
+/* Master list of all algorithms */
+static AlgoPlugin *all_algorithms[ALG_MAX] = {
     &algo_dijkstra, &algo_astar, &algo_bellman_ford,
     &algo_ida_star, &algo_floyd_warshall, &algo_jps,
     &algo_fringe, &algo_flowfield, &algo_dstar_lite,
@@ -59,26 +60,33 @@ static AlgoPlugin *algorithms[ALG_COUNT] = {
     &algo_ch, &algo_anya,
 };
 
+/* Active (filtered) list — populated from CLI or defaults to all */
+static AlgoPlugin *algorithms[ALG_MAX];
+static int alg_count = 0;
+
 static int current_alg = 0;
 static AlgoVis *vis = NULL;
 
-/* Per-algorithm info bar colors */
-static const SDL_Color alg_colors[ALG_COUNT] = {
-    {255, 160, 80,  255},  /* 1  Dijkstra: orange */
-    {100, 180, 255, 255},  /* 2  A*: blue */
-    {50,  230, 100, 255},  /* 3  Bellman-Ford: green */
-    {180, 100, 255, 255},  /* 4  IDA*: purple */
-    {255, 220, 50,  255},  /* 5  Floyd-Warshall: yellow */
-    {80,  255, 220, 255},  /* 6  JPS: cyan */
-    {220, 180, 255, 255},  /* 7  Fringe: lavender */
-    {255, 120, 180, 255},  /* 8  Flow Fields: pink */
-    {120, 255, 120, 255},  /* 9  D* Lite: bright green */
-    {255, 200, 100, 255},  /* 0  Theta*: gold */
-    {100, 200, 200, 255},  /* F1 RSR: teal */
-    {200, 100, 100, 255},  /* F2 Subgoal: rust */
-    {150, 150, 255, 255},  /* F3 CH: periwinkle */
-    {255, 150, 50,  255},  /* F4 BiDir-A*: tangerine */
+/* Per-algorithm info bar colors (indexed by master list position) */
+static const SDL_Color all_alg_colors[ALG_MAX] = {
+    {255, 160, 80,  255},  /* 0  Dijkstra: orange */
+    {100, 180, 255, 255},  /* 1  A*: blue */
+    {50,  230, 100, 255},  /* 2  Bellman-Ford: green */
+    {180, 100, 255, 255},  /* 3  IDA*: purple */
+    {255, 220, 50,  255},  /* 4  Floyd-Warshall: yellow */
+    {80,  255, 220, 255},  /* 5  JPS: cyan */
+    {220, 180, 255, 255},  /* 6  Fringe: lavender */
+    {255, 120, 180, 255},  /* 7  Flow Fields: pink */
+    {120, 255, 120, 255},  /* 8  D* Lite: bright green */
+    {255, 200, 100, 255},  /* 9  Theta*: gold */
+    {100, 200, 200, 255},  /* 10 RSR: teal */
+    {200, 100, 100, 255},  /* 11 Subgoal: rust */
+    {150, 150, 255, 255},  /* 12 CH: periwinkle */
+    {255, 150, 50,  255},  /* 13 BiDir-A*: tangerine */
 };
+
+/* Active color list, built alongside algorithms[] */
+static SDL_Color alg_colors[ALG_MAX];
 
 /* ── Dynamic rendering ───────────────────────────────────────────── */
 
@@ -362,8 +370,62 @@ static void run_benchmark(void) {
 
 /* ── Main ────────────────────────────────────────────────────────── */
 
+static int use_gpu = 0;
+
+static void select_algorithms(int argc, char *argv[]) {
+    /* Parse flags and algorithm names from args */
+    alg_count = 0;
+    for (int a = 1; a < argc; a++) {
+        const char *arg = argv[a];
+
+        /* Flags */
+        if (strcmp(arg, "--gpu") == 0) { use_gpu = 1; continue; }
+        if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+            printf("Usage: visualizer [--gpu] [algo ...]\n");
+            printf("  --gpu     Use hardware-accelerated renderer (default: software)\n");
+            printf("  algo      Algorithm name prefix (case-insensitive). Available:\n           ");
+            for (int i = 0; i < ALG_MAX; i++)
+                printf(" %s", all_algorithms[i]->name);
+            printf("\n  No algo args = load all\n");
+            exit(0);
+        }
+
+        /* Match arg against algorithm names (case-insensitive prefix) */
+        for (int i = 0; i < ALG_MAX; i++) {
+            const char *name = all_algorithms[i]->name;
+            int match = 1;
+            for (int k = 0; arg[k]; k++) {
+                char ac = arg[k], nc = name[k];
+                if (!nc) { match = 0; break; }
+                if (ac >= 'A' && ac <= 'Z') ac += 32;
+                if (nc >= 'A' && nc <= 'Z') nc += 32;
+                if (ac != nc) { match = 0; break; }
+            }
+            if (match && alg_count < ALG_MAX) {
+                int dup = 0;
+                for (int j = 0; j < alg_count; j++)
+                    if (algorithms[j] == all_algorithms[i]) { dup = 1; break; }
+                if (!dup) {
+                    algorithms[alg_count] = all_algorithms[i];
+                    alg_colors[alg_count] = all_alg_colors[i];
+                    alg_count++;
+                }
+            }
+        }
+    }
+
+    /* No algo args = load all */
+    if (alg_count == 0) {
+        for (int i = 0; i < ALG_MAX; i++) {
+            algorithms[i] = all_algorithms[i];
+            alg_colors[i] = all_alg_colors[i];
+        }
+        alg_count = ALG_MAX;
+    }
+}
+
 int main(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    select_algorithms(argc, argv);
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -384,7 +446,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+    if (use_gpu) {
+        ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+        if (!ren)
+            fprintf(stderr, "GPU renderer failed, falling back to software\n");
+    }
     if (!ren)
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     if (!ren) {
@@ -401,10 +467,12 @@ int main(int argc, char *argv[]) {
     int step_ms = 40;
     Uint32 last_step = 0;
 
-    printf("Pathfinding Visualizer\n");
+    printf("Pathfinding Visualizer (%d algorithms loaded)\n", alg_count);
     printf("  Space = step       Enter = auto-run   R   = reset    B = benchmark\n");
-    printf("  1=Dijkstra 2=A* 3=BF 4=IDA* 5=FW 6=JPS 7=Fringe 8=FlowField 9=D*Lite 0=Theta*\n");
-    printf("  F1=RSR  F2=Subgoal  F3=CH  F4=BiDir-A*\n");
+    printf("  Algorithms: ");
+    for (int i = 0; i < alg_count; i++)
+        printf("%d=%s ", i + 1, algorithms[i]->name);
+    printf("\n");
     printf("  Tab = next map     +/- = speed        Q/Esc = quit\n");
     printf("\n");
     print_stats(step_ms, 1);
@@ -431,76 +499,33 @@ int main(int argc, char *argv[]) {
                     init_algorithm();
                     auto_run = 0;
                     break;
-                case SDLK_1:
-                    current_alg = 0;
-                    init_algorithm();
-                    auto_run = 0;
+                case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4:
+                case SDLK_5: case SDLK_6: case SDLK_7: case SDLK_8:
+                case SDLK_9: {
+                    int idx = ev.key.keysym.sym - SDLK_1;
+                    if (idx < alg_count) {
+                        current_alg = idx;
+                        init_algorithm();
+                        auto_run = 0;
+                    }
                     break;
-                case SDLK_2:
-                    current_alg = 1;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_3:
-                    current_alg = 2;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_4:
-                    current_alg = 3;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_5:
-                    current_alg = 4;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_6:
-                    current_alg = 5;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_7:
-                    current_alg = 6;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_8:
-                    current_alg = 7;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_9:
-                    current_alg = 8;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
+                }
                 case SDLK_0:
-                    current_alg = 9;
-                    init_algorithm();
-                    auto_run = 0;
+                    if (9 < alg_count) {
+                        current_alg = 9;
+                        init_algorithm();
+                        auto_run = 0;
+                    }
                     break;
-                case SDLK_F1:
-                    current_alg = 10;
-                    init_algorithm();
-                    auto_run = 0;
+                case SDLK_F1: case SDLK_F2: case SDLK_F3: case SDLK_F4: {
+                    int idx = 10 + (ev.key.keysym.sym - SDLK_F1);
+                    if (idx < alg_count) {
+                        current_alg = idx;
+                        init_algorithm();
+                        auto_run = 0;
+                    }
                     break;
-                case SDLK_F2:
-                    current_alg = 11;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_F3:
-                    current_alg = 12;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
-                case SDLK_F4:
-                    current_alg = 13;
-                    init_algorithm();
-                    auto_run = 0;
-                    break;
+                }
                 case SDLK_b:
                     auto_run = 0;
                     run_benchmark();
