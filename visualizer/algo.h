@@ -157,7 +157,9 @@ static inline void vis_trace_path(AlgoVis *vis, const int *parent, const int *co
     }
 }
 
-/* ── Min-heap (used by Dijkstra, A*, JPS) ────────────────────────── */
+/* ── Min-heap ────────────────────────────────────────────────────── */
+
+#define HEAP_CAP (MAX_NODES * 8)
 
 typedef struct {
     int node;
@@ -165,13 +167,14 @@ typedef struct {
 } HeapEntry;
 
 typedef struct {
-    HeapEntry data[MAX_NODES * 4];
+    HeapEntry data[HEAP_CAP];
     int size;
 } Heap;
 
 static inline void heap_init(Heap *h) { h->size = 0; }
 
 static inline void heap_push(Heap *h, int node, int priority) {
+    if (h->size >= HEAP_CAP) return;
     int i = h->size++;
     h->data[i].node = node;
     h->data[i].priority = priority;

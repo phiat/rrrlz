@@ -216,66 +216,67 @@ static int ch_step(AlgoVis *vis) {
     s->vis.steps++;
 
     if (s->phase == 0) {
-        /* Phase 1: Contract one node per step */
-        int node = ch_find_next(s);
-        if (node < 0) {
-            /* All contracted, build upward graph and start search */
-            s->phase = 1;
-            int start = s->vis.start_node;
-            int goal = s->vis.end_node;
-            s->fwd_dist[start] = 0;
-            s->bwd_dist[goal] = 0;
-            heap_push(&s->fwd_heap, start, 0);
-            heap_push(&s->bwd_heap, goal, 0);
-            s->fwd_turn = 1;
-
-            /* Add original edges as upward edges (lower→higher level) */
-            int cols = s->vis.cols;
-            for (int i = 0; i < s->total_nodes; i++) {
-                if (s->map->data[i] != 0) continue;
-                int r = i / cols, c = i % cols;
-                for (int d = 0; d < 4; d++) {
-                    int nr = r + DR[d], nc = c + DC[d];
-                    if (!is_valid(s->map, nr, nc)) continue;
-                    int ni = get_index(cols, nr, nc);
-                    if (s->level[ni] > s->level[i])
-                        add_up_edge(s, i, ni, 1, -1);
-                }
-            }
-
-            return 1;
-        }
-
-        s->contracted[node] = 1;
-        s->level[node] = s->contract_order++;
-
-        if (node != s->vis.start_node && node != s->vis.end_node)
-            s->vis.cells[node] = VIS_PREPROCESS;
-
-        /* Add shortcuts */
+        /* Phase 1: Batch-contract nodes per step for responsiveness */
         int cols = s->vis.cols;
-        int r = node / cols, c = node % cols;
-        for (int d1 = 0; d1 < 4; d1++) {
-            int nr1 = r + DR[d1], nc1 = c + DC[d1];
-            if (!is_valid(s->map, nr1, nc1)) continue;
-            int n1 = get_index(cols, nr1, nc1);
-            if (s->contracted[n1]) continue;
-            for (int d2 = d1 + 1; d2 < 4; d2++) {
-                int nr2 = r + DR[d2], nc2 = c + DC[d2];
-                if (!is_valid(s->map, nr2, nc2)) continue;
-                int n2 = get_index(cols, nr2, nc2);
-                if (s->contracted[n2]) continue;
+        int batch = s->total_nodes / 50;
+        if (batch < 10) batch = 10;
 
-                if (!witness_exists(s, n1, n2, 2, node) &&
-                    s->shortcut_count < MAX_SHORTCUTS) {
-                    Shortcut *sc = &s->shortcuts[s->shortcut_count++];
-                    sc->from = n1; sc->to = n2; sc->cost = 2; sc->mid = node;
-                    /* Add upward edges for shortcuts later (after all contracted) */
+        for (int b = 0; b < batch; b++) {
+            int node = ch_find_next(s);
+            if (node < 0) {
+                /* All contracted, build upward graph and start search */
+                s->phase = 1;
+                s->fwd_dist[s->vis.start_node] = 0;
+                s->bwd_dist[s->vis.end_node] = 0;
+                heap_push(&s->fwd_heap, s->vis.start_node, 0);
+                heap_push(&s->bwd_heap, s->vis.end_node, 0);
+                s->fwd_turn = 1;
+
+                /* Add original edges as upward edges (lower→higher level) */
+                for (int i = 0; i < s->total_nodes; i++) {
+                    if (s->map->data[i] != 0) continue;
+                    int ir = i / cols, ic = i % cols;
+                    for (int d = 0; d < 4; d++) {
+                        int nr = ir + DR[d], nc = ic + DC[d];
+                        if (!is_valid(s->map, nr, nc)) continue;
+                        int ni = get_index(cols, nr, nc);
+                        if (s->level[ni] > s->level[i])
+                            add_up_edge(s, i, ni, 1, -1);
+                    }
+                }
+
+                return 1;
+            }
+
+            s->contracted[node] = 1;
+            s->level[node] = s->contract_order++;
+
+            if (node != s->vis.start_node && node != s->vis.end_node)
+                s->vis.cells[node] = VIS_PREPROCESS;
+
+            /* Add shortcuts */
+            int r = node / cols, c = node % cols;
+            for (int d1 = 0; d1 < 4; d1++) {
+                int nr1 = r + DR[d1], nc1 = c + DC[d1];
+                if (!is_valid(s->map, nr1, nc1)) continue;
+                int n1 = get_index(cols, nr1, nc1);
+                if (s->contracted[n1]) continue;
+                for (int d2 = d1 + 1; d2 < 4; d2++) {
+                    int nr2 = r + DR[d2], nc2 = c + DC[d2];
+                    if (!is_valid(s->map, nr2, nc2)) continue;
+                    int n2 = get_index(cols, nr2, nc2);
+                    if (s->contracted[n2]) continue;
+
+                    if (!witness_exists(s, n1, n2, 2, node) &&
+                        s->shortcut_count < MAX_SHORTCUTS) {
+                        Shortcut *sc = &s->shortcuts[s->shortcut_count++];
+                        sc->from = n1; sc->to = n2; sc->cost = 2; sc->mid = node;
+                    }
                 }
             }
-        }
 
-        s->vis.nodes_explored++;
+            s->vis.nodes_explored++;
+        }
         return 1;
     }
 
@@ -296,71 +297,69 @@ static int ch_step(AlgoVis *vis) {
 
     if (s->phase == 2) {
         /* Alternate forward/backward Dijkstra ascending hierarchy */
-        int did_work = 0;
+        if (s->fwd_turn) {
+            s->fwd_turn = 0;
+            if (s->fwd_heap.size > 0) {
+                HeapEntry cur = heap_pop(&s->fwd_heap);
+                int node = cur.node;
+                if (!s->fwd_closed[node]) {
+                    s->fwd_closed[node] = 1;
+                    s->vis.nodes_explored++;
+                    if (node != s->vis.start_node && node != s->vis.end_node)
+                        s->vis.cells[node] = VIS_OPEN;
 
-        if (s->fwd_turn && s->fwd_heap.size > 0) {
-            HeapEntry cur = heap_pop(&s->fwd_heap);
-            int node = cur.node;
-            if (!s->fwd_closed[node]) {
-                s->fwd_closed[node] = 1;
-                s->vis.nodes_explored++;
-                if (node != s->vis.start_node && node != s->vis.end_node)
-                    s->vis.cells[node] = VIS_OPEN;
+                    /* Check meeting */
+                    if (s->bwd_dist[node] != INT_MAX) {
+                        int total_cost = s->fwd_dist[node] + s->bwd_dist[node];
+                        if (total_cost < s->mu) {
+                            s->mu = total_cost;
+                            s->meet_node = node;
+                        }
+                    }
 
-                /* Check meeting */
-                if (s->bwd_dist[node] != INT_MAX) {
-                    int total_cost = s->fwd_dist[node] + s->bwd_dist[node];
-                    if (total_cost < s->mu) {
-                        s->mu = total_cost;
-                        s->meet_node = node;
+                    /* Relax upward neighbors */
+                    for (int i = 0; i < s->up_count[node]; i++) {
+                        int nb = s->up_adj[node][i];
+                        int nc = s->fwd_dist[node] + s->up_cost[node][i];
+                        if (nc < s->fwd_dist[nb]) {
+                            s->vis.relaxations++;
+                            s->fwd_dist[nb] = nc;
+                            s->fwd_parent[nb] = node;
+                            heap_push(&s->fwd_heap, nb, nc);
+                        }
                     }
                 }
-
-                /* Relax upward neighbors */
-                for (int i = 0; i < s->up_count[node]; i++) {
-                    int nb = s->up_adj[node][i];
-                    int nc = s->fwd_dist[node] + s->up_cost[node][i];
-                    if (nc < s->fwd_dist[nb]) {
-                        s->vis.relaxations++;
-                        s->fwd_dist[nb] = nc;
-                        s->fwd_parent[nb] = node;
-                        heap_push(&s->fwd_heap, nb, nc);
-                    }
-                }
-                did_work = 1;
             }
-        }
+        } else {
+            s->fwd_turn = 1;
+            if (s->bwd_heap.size > 0) {
+                HeapEntry cur = heap_pop(&s->bwd_heap);
+                int node = cur.node;
+                if (!s->bwd_closed[node]) {
+                    s->bwd_closed[node] = 1;
+                    s->vis.nodes_explored++;
+                    if (node != s->vis.start_node && node != s->vis.end_node)
+                        s->vis.cells[node] = VIS_CLOSED;
 
-        s->fwd_turn = !s->fwd_turn;
+                    if (s->fwd_dist[node] != INT_MAX) {
+                        int total_cost = s->fwd_dist[node] + s->bwd_dist[node];
+                        if (total_cost < s->mu) {
+                            s->mu = total_cost;
+                            s->meet_node = node;
+                        }
+                    }
 
-        if (!s->fwd_turn && s->bwd_heap.size > 0) {
-            HeapEntry cur = heap_pop(&s->bwd_heap);
-            int node = cur.node;
-            if (!s->bwd_closed[node]) {
-                s->bwd_closed[node] = 1;
-                s->vis.nodes_explored++;
-                if (node != s->vis.start_node && node != s->vis.end_node)
-                    s->vis.cells[node] = VIS_CLOSED;
-
-                if (s->fwd_dist[node] != INT_MAX) {
-                    int total_cost = s->fwd_dist[node] + s->bwd_dist[node];
-                    if (total_cost < s->mu) {
-                        s->mu = total_cost;
-                        s->meet_node = node;
+                    for (int i = 0; i < s->up_count[node]; i++) {
+                        int nb = s->up_adj[node][i];
+                        int nc = s->bwd_dist[node] + s->up_cost[node][i];
+                        if (nc < s->bwd_dist[nb]) {
+                            s->vis.relaxations++;
+                            s->bwd_dist[nb] = nc;
+                            s->bwd_parent[nb] = node;
+                            heap_push(&s->bwd_heap, nb, nc);
+                        }
                     }
                 }
-
-                for (int i = 0; i < s->up_count[node]; i++) {
-                    int nb = s->up_adj[node][i];
-                    int nc = s->bwd_dist[node] + s->up_cost[node][i];
-                    if (nc < s->bwd_dist[nb]) {
-                        s->vis.relaxations++;
-                        s->bwd_dist[nb] = nc;
-                        s->bwd_parent[nb] = node;
-                        heap_push(&s->bwd_heap, nb, nc);
-                    }
-                }
-                did_work = 1;
             }
         }
 
@@ -381,7 +380,7 @@ static int ch_step(AlgoVis *vis) {
             goto found_path;
         }
 
-        return did_work ? 1 : (s->vis.done = 1, 0);
+        return 1;
 
 found_path:
         s->vis.done = 1;
