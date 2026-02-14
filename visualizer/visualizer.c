@@ -370,7 +370,7 @@ static void run_benchmark(void) {
 
 /* ── Main ────────────────────────────────────────────────────────── */
 
-static int use_gpu = 0;
+static int use_cpu = 0;
 
 static void select_algorithms(int argc, char *argv[]) {
     /* Parse flags and algorithm names from args */
@@ -379,10 +379,10 @@ static void select_algorithms(int argc, char *argv[]) {
         const char *arg = argv[a];
 
         /* Flags */
-        if (strcmp(arg, "--gpu") == 0) { use_gpu = 1; continue; }
+        if (strcmp(arg, "--cpu") == 0) { use_cpu = 1; continue; }
         if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
-            printf("Usage: visualizer [--gpu] [algo ...]\n");
-            printf("  --gpu     Use hardware-accelerated renderer (default: software)\n");
+            printf("Usage: visualizer [--cpu] [algo ...]\n");
+            printf("  --cpu     Use software renderer (default: GPU)\n");
             printf("  algo      Algorithm name prefix (case-insensitive). Available:\n           ");
             for (int i = 0; i < ALG_MAX; i++)
                 printf(" %s", all_algorithms[i]->name);
@@ -446,7 +446,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (use_gpu) {
+    if (!use_cpu) {
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
         if (!ren)
             fprintf(stderr, "GPU renderer failed, falling back to software\n");
