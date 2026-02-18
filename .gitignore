@@ -8,6 +8,9 @@
 *_opt_*.s
 *_clang_*
 
+# Beads issue tracker
+.beads/
+
 # Editor/IDE
 *.swp
 *.swo
