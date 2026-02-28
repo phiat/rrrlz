@@ -17,3 +17,6 @@
 *~
 .vscode/
 .idea/
+
+# Claude artifacts
+AGENTS.md
